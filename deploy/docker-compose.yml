@@ -1,0 +1,16 @@
+version: '3.8'
+services:
+  bot:
+    build: .
+    restart: always
+    env_file:
+      - .env
+  db:
+    image: postgres:latest
+    restart: always
+    environment:
+      POSTGRES_DB: career_quest
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
