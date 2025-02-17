@@ -1,6 +1,6 @@
 from aiogram import Router, types
 from aiogram.filters import Command
-from bot.keyboards.student_keyboards import main_menu
+from keyboards.student_keyboards import main_menu
 
 router = Router()
 

@@ -1,6 +1,6 @@
 from aiogram import BaseMiddleware
 from aiogram.types import Message
-from bot.utils.database import is_organizer
+from utils.database import is_organizer
 
 class RoleMiddleware(BaseMiddleware):
     async def __call__(self, handler, event: Message, data):

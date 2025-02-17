@@ -2,8 +2,9 @@ import logging
 import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
-from bot.handlers import student, organizer
-from bot.utils.config import TOKEN
+from handlers import student, organizer
+from utils.config import TOKEN
+from utils.database import init_db
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -28,7 +29,12 @@ async def set_commands():
     await bot.set_my_commands(commands)
 
 async def main():
+    print("🔄 Настройка базы данных...")
+    await init_db()  # Создает таблицы
+    print("🚀 База данных готова!")
+    
     await set_commands()
+    print("✅ Бот запущен!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

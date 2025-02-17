@@ -1,6 +1,6 @@
 from aiogram import Bot
-from bot.utils.database import get_all_students
-from bot.utils.config import TOKEN
+from utils.database import get_all_students
+from utils.config import TOKEN
 
 bot = Bot(token=TOKEN)
 

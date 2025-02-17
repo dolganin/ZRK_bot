@@ -1,6 +1,5 @@
 from aiogram import Router, types
 from aiogram.filters import Command
-from bot.utils.database import send_notification
 
 router = Router()
 
@@ -11,6 +10,7 @@ async def cmd_notify(message: types.Message):
 
 @router.message()
 async def process_notify(message: types.Message):
+    from bot.utils.database import send_notification  # Move the import here
     text = message.text
     await send_notification(text)
     await message.answer("✅ Уведомление отправлено всем студентам!")

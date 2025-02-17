@@ -1,7 +1,7 @@
 from aiogram import Router, types
 from aiogram.filters import Command
-from bot.utils.database import get_balance, register_student, add_points, spend_points, get_top_students
-from bot.keyboards.student_keyboards import main_menu
+from utils.database import get_balance, register_student, add_points, spend_points, get_top_students
+from keyboards.student_keyboards import main_menu
 
 router = Router()
 
