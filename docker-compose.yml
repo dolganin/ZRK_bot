@@ -8,6 +8,7 @@ services:
     restart: always
     depends_on:
       - db
+      - redis  # Добавляем зависимость от Redis
     volumes:
       - .:/app  # Подключаем локальный код для обновления без пересборки
     env_file:
@@ -25,7 +26,16 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data  # Сохраняем данные между перезапусками
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql  # Добавляем скрипт инициализации
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql  # Автоматическое выполнение init.sql
+
+  redis:
+    image: redis:latest  # Используем официальный образ Redis
+    restart: always
+    ports:
+      - "6379:6379"  # Открываем порт Redis
+    volumes:
+      - redis_data:/data  # Сохраняем данные Redis
 
 volumes:
   pgdata:
+  redis_data:  # Создаём volume для Redis

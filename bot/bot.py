@@ -1,7 +1,9 @@
 import logging
 import asyncio
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import BotCommand
+from aioredis import Redis
 from handlers import student, organizer
 from utils.config import TOKEN
 from utils.database import init_db
@@ -9,22 +11,26 @@ from utils.database import init_db
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
+# Инициализация подключения к Redis (для хранения состояний)
+redis = Redis(host='redis', port=6379, db=0)
+storage = RedisStorage(redis)
+
 # Инициализация бота и диспетчера
 bot = Bot(token=TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(storage=storage)  # Используем RedisStorage для хранения состояний
 
-# Регистрация обработчиков
+# Включаем роутеры
 dp.include_router(student.router)
 dp.include_router(organizer.router)
 
-# Установка команд
 async def set_commands():
     commands = [
-        BotCommand(command="/start", description="Начать работу"),
-        BotCommand(command="/code", description="Получить баллы"),
-        BotCommand(command="/spend", description="Потратить баллы"),
-        BotCommand(command="/top", description="Просмотр рейтинга"),
-        BotCommand(command="/notify", description="Отправить уведомление (организаторы)")
+        BotCommand(command="/start", description="Начать"),
+        BotCommand(command="/code", description="Ввести код для начисления баллов"),
+        BotCommand(command="/spend", description="Ввести код для списания баллов"),
+        BotCommand(command="/top", description="Посмотреть топ студентов"),
+        BotCommand(command="/add_admin", description="Добавить администратора"),
+        BotCommand(command="/notify", description="Отправить уведомление студентам")
     ]
     await bot.set_my_commands(commands)
 

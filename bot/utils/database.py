@@ -77,3 +77,32 @@ async def get_top_students():
     """Возвращает топ студентов"""
     db = await get_db()
     return await db.fetch("SELECT name, balance FROM students ORDER BY balance DESC LIMIT 10")
+
+async def add_admin(user_id):
+    """Добавляет пользователя в администраторы"""
+    db = await get_db()
+    async with db.acquire() as conn:
+        await conn.execute("INSERT INTO admins (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING", user_id)
+
+async def is_admin(user_id):
+    """Проверяет, является ли пользователь администратором"""
+    db = await get_db()
+    async with db.acquire() as conn:
+        return await conn.fetchval("SELECT 1 FROM admins WHERE user_id=$1", user_id) is not None
+
+async def send_notification(text):
+    """Отправляет уведомление всем студентам"""
+    db = await get_db()
+    async with db.acquire() as conn:
+        students = await conn.fetch("SELECT id FROM students")
+        for student in students:
+            # Здесь вы можете использовать ваш метод отправки сообщений
+            # Например, bot.send_message(student['id'], text)
+            await send_message(student['id'], text)
+
+async def send_message(user_id, text):
+    """Отправляет сообщение пользователю"""
+    # Реализуйте ваш метод отправки сообщений здесь
+    # Например, если вы используете библиотеку aiogram:
+    from bot import bot  # Импортируйте ваш экземпляр бота
+    await bot.send_message(user_id, text)

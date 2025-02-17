@@ -1,12 +1,16 @@
 FROM python:3.12
 
+# Устанавливаем рабочую директорию
 WORKDIR /app
 
-COPY bot/bot.py /app/bot/
+# Копируем только файл с зависимостями
+COPY requirements.txt /app/
+
+# Устанавливаем зависимости ДО копирования остального кода (используем кэш)
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Копируем оставшийся код проекта
 COPY . /app
 
-
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-CMD ["python3", "/app/bot/bot.py"]
+# Запускаем бота
+CMD ["python3", "bot/bot.py"]
