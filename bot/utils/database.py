@@ -35,15 +35,18 @@ async def get_db():
     """Создает пул соединений с базой данных"""
     return await asyncpg.create_pool(DATABASE_URL)
 
-async def register_student(user_id):
+async def register_student(user_id, name):
     """Регистрирует студента, если он еще не зарегистрирован"""
     db = await get_db()
     async with db.acquire() as conn:
         existing = await conn.fetchval("SELECT id FROM students WHERE id=$1", user_id)
         if existing:
             return False
-        await conn.execute("INSERT INTO students (id, balance) VALUES ($1, 0)", user_id)
+        # Вставляем в таблицу студента с указанным именем
+        await conn.execute("INSERT INTO students (id, name, balance) VALUES ($1, $2, 0)", user_id, name)
         return True
+
+
 
 async def get_balance(user_id):
     """Возвращает баланс студента"""
@@ -102,7 +105,5 @@ async def send_notification(text):
 
 async def send_message(user_id, text):
     """Отправляет сообщение пользователю"""
-    # Реализуйте ваш метод отправки сообщений здесь
-    # Например, если вы используете библиотеку aiogram:
-    from bot import bot  # Импортируйте ваш экземпляр бота
+    from core.bot import bot  # Импортируем бота
     await bot.send_message(user_id, text)

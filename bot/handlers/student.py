@@ -17,7 +17,8 @@ class CodeStates(StatesGroup):
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    if not await register_student(user_id):
+    user_name = message.from_user.full_name  # Получаем полное имя пользователя
+    if not await register_student(user_id, user_name):  # Передаем имя в функцию регистрации
         await message.answer("Вы уже зарегистрированы!", reply_markup=main_menu())
     else:
         await message.answer("Добро пожаловать! Используйте меню для взаимодействия.")

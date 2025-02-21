@@ -1,16 +1,13 @@
-FROM python:3.12
+FROM python:3.12-slim
 
-# Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Копируем только файл с зависимостями
-COPY requirements.txt /app/
+# Установка зависимостей для PostgreSQL-клиента (если нужно) и pip
+RUN apt-get update && apt-get install -y postgresql-client
 
-# Устанавливаем зависимости ДО копирования остального кода (используем кэш)
+COPY requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем оставшийся код проекта
-COPY . /app
+COPY . .
 
-# Запускаем бота
 CMD ["python3", "bot/bot.py"]

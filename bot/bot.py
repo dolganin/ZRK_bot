@@ -1,29 +1,12 @@
-import logging
 import asyncio
-from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.redis import RedisStorage
+import logging
+from core.bot import bot
+from core.dp import dp
 from aiogram.types import BotCommand
-from aioredis import Redis
-from handlers import student, organizer
-from utils.config import TOKEN
 from utils.database import init_db
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
-
-# Инициализация подключения к Redis (для хранения состояний)
-redis = Redis(host='redis', port=6379, db=0)
-storage = RedisStorage(redis)
-
-# Инициализация бота и диспетчера
-bot = Bot(token=TOKEN)
-dp = Dispatcher(storage=storage)  # Используем RedisStorage для хранения состояний
-
-# Включаем роутеры
-dp.include_router(student.router)
-dp.include_router(organizer.router)
-
 async def set_commands():
+    """Задает список команд для бота."""
     commands = [
         BotCommand(command="/start", description="Начать"),
         BotCommand(command="/code", description="Ввести код для начисления баллов"),
