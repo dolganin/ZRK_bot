@@ -19,3 +19,19 @@ CREATE TABLE IF NOT EXISTS merch (
     cost INTEGER NOT NULL,
     used BOOLEAN DEFAULT FALSE
 );
+
+CREATE TABLE events (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE codes (
+    id SERIAL PRIMARY KEY,
+    event_id INTEGER REFERENCES events(id),
+    code TEXT NOT NULL UNIQUE,
+    points INTEGER NOT NULL,
+    is_income BOOLEAN NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
