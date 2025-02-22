@@ -5,7 +5,6 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from utils.database import (
     get_balance, 
-    register_student, 
     add_points, 
     spend_points, 
     get_all_students_rating, 

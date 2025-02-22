@@ -98,13 +98,19 @@ async def register_student(user_id: int, name: str, telegram_username: str = Non
             if existing:
                 return False  # Студент с таким ID уже зарегистрирован
 
-            # Вставляем данные о студенте в таблицу
+            # Исправленный запрос с явным указанием столбцов
             await conn.execute(
                 """
-                INSERT INTO students (id, name, telegram_username, balance, course, faculty)
-                VALUES ($1, $2, $3, 0, $4, $5)
+                INSERT INTO students 
+                    (id, name, telegram_username, course, faculty)
+                VALUES 
+                    ($1, $2, $3, $4, $5)
                 """,
-                user_id, name, telegram_username, course, faculty
+                user_id, 
+                name, 
+                telegram_username, 
+                course, 
+                faculty  # Теперь параметры совпадают с порядком в запросе
             )
             return True
 

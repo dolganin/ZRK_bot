@@ -7,6 +7,11 @@ from keyboards.student_keyboards import main_menu
 from utils.database import is_admin, get_balance, register_student
 from keyboards.organizer_keyboards import organizer_menu
 
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 router = Router()
 
 # Стейт-машина для регистрации
@@ -28,8 +33,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await message.answer(text)
     await state.set_state(RegistrationState.waiting_for_name)
 
-# Обработка ФИО
-# Обработка ФИО
+
 @router.message(RegistrationState.waiting_for_name)
 async def process_name(message: types.Message, state: FSMContext):
     # Сохраняем введенное ФИО
@@ -115,7 +119,11 @@ async def process_faculty(message: types.Message, state: FSMContext):
 
     # Сохраняем данные в базу данных
     user_id = message.from_user.id
-    await register_student(user_id, name, course, faculty)
+    username = message.from_user.username
+
+    logger.info(user_id)
+
+    await register_student(user_id, name, username, course, faculty)
 
     # Подтверждаем регистрацию
     text = f"Регистрация завершена! 🎉\n\n" \
