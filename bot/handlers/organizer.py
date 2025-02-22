@@ -5,6 +5,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from keyboards.organizer_keyboards import organizer_menu
+from keyboards.organizer_keyboards import main_menu
 from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
@@ -68,6 +69,7 @@ async def show_rating(message: types.Message):
 @router.message(F.text == "📢 Уведомление")
 async def start_notify(message: types.Message, state: FSMContext):
     if not await is_admin(message.from_user.id):
+        await message.answer("❌ У вас нет доступа к этой команде.", reply_markup=main_menu())
         return
     
     await message.answer("✍️ Введите текст уведомления:", reply_markup=types.ReplyKeyboardRemove())
@@ -82,6 +84,7 @@ async def process_notify(message: types.Message, state: FSMContext):
 @router.message(F.text == "🔑 Создать код")
 async def generate_code_handler(message: types.Message):
     if not await is_admin(message.from_user.id):
+        await message.answer("❌ У вас нет доступа к этой команде.", reply_markup=main_menu())
         return
     
     try:
@@ -98,6 +101,7 @@ async def generate_code_handler(message: types.Message):
 @router.message(F.text == "🎯 Мероприятие")
 async def manage_event(message: types.Message, state: FSMContext):
     if not await is_admin(message.from_user.id):
+        await message.answer("❌ У вас нет доступа к этой команде.", reply_markup=main_menu())
         return
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -154,6 +158,7 @@ async def delete_event_callback(callback: types.CallbackQuery, state: FSMContext
 @router.message(F.text == "👥 Добавить админа")
 async def start_add_admin(message: types.Message, state: FSMContext):
     if not await is_admin(message.from_user.id):
+        await message.answer("❌ У вас нет доступа к этой команде.", reply_markup=main_menu())
         return
     
     await message.answer("🆔 Введите ID пользователя:", reply_markup=types.ReplyKeyboardRemove())
@@ -175,6 +180,7 @@ async def process_add_admin(message: types.Message, state: FSMContext):
 @router.message(F.text == "📜 Активные коды")
 async def show_active_codes(message: types.Message):
     if not await is_admin(message.from_user.id):
+        await message.answer("❌ У вас нет доступа к этой команде.", reply_markup=main_menu())
         return
 
     codes = await get_codes_usage()  # Получаем список кодов с их использованием
@@ -199,6 +205,7 @@ async def show_active_codes(message: types.Message):
 @router.message(F.text == "🔑 Код к мероприятию")
 async def cmd_manage_code(message: types.Message, state: FSMContext):
     if not await is_admin(message.from_user.id):
+        await message.answer("❌ У вас нет доступа к этой команде.", reply_markup=main_menu())
         return
 
     events = await get_events()
