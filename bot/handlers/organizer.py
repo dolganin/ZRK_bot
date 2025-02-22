@@ -5,7 +5,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from keyboards.organizer_keyboards import organizer_menu
-from keyboards.organizer_keyboards import main_menu
+from keyboards.student_keyboards import main_menu
 from aiogram.types import (
     ReplyKeyboardMarkup,
     KeyboardButton,
