@@ -85,23 +85,29 @@ async def close_db():
         _pool = None
         logger.info("Connection pool closed")
 
-async def register_student(user_id: int, name: str) -> bool:
-    """Регистрация нового студента"""
+async def register_student(user_id: int, name: str, telegram_username: str = None, course: str = None, faculty: str = None) -> bool:
+    """Регистрация нового студента с учетом никнейма, курса и факультета"""
     pool = await get_db()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            # Проверяем, существует ли уже студент с таким ID
             existing = await conn.fetchval(
                 "SELECT id FROM students WHERE id = $1", 
                 user_id
             )
             if existing:
-                return False
-            
+                return False  # Студент с таким ID уже зарегистрирован
+
+            # Вставляем данные о студенте в таблицу
             await conn.execute(
-                "INSERT INTO students (id, name, balance) VALUES ($1, $2, 0)",
-                user_id, name
+                """
+                INSERT INTO students (id, name, telegram_username, balance, course, faculty)
+                VALUES ($1, $2, $3, 0, $4, $5)
+                """,
+                user_id, name, telegram_username, course, faculty
             )
             return True
+
 
 async def get_balance(user_id: int) -> int:
     """Получение баланса студента"""
@@ -113,84 +119,94 @@ async def get_balance(user_id: int) -> int:
         )
 
 async def add_points(user_id: int, code: str) -> Optional[int]:
-    """Начисление баллов по коду"""
+    """Начисление баллов по коду (если код ещё не использован этим пользователем).
+       Если для пары (user_id, code_id) отсутствует запись в user_codes,
+       производится начисление баллов и создаётся запись о использовании.
+    """
     pool = await get_db()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            # Ищем код в таблице codes
             code_data = await conn.fetchrow(
-                """SELECT points FROM codes 
-                WHERE code = $1 AND is_active = TRUE""",
+                "SELECT id, points, is_income FROM codes WHERE code = $1",
                 code.upper()
             )
-            
-            if not code_data:
+
+            # Если код не найден или предназначен не для начисления баллов
+            if not code_data or not code_data["is_income"]:
                 return None
-            
-            points = code_data['points']
-            await conn.execute(
-                """UPDATE students 
-                SET balance = balance + $1 
-                WHERE id = $2""",
-                points, user_id
+
+            # Проверяем, использовал ли пользователь этот код ранее
+            is_used = await conn.fetchrow(
+                "SELECT 1 FROM user_codes WHERE user_id = $1 AND code_id = $2",
+                user_id, code_data["id"]
             )
-            
+            if is_used:
+                return None  # Код уже был использован этим пользователем
+
+            # Начисляем баллы студенту
             await conn.execute(
-                """UPDATE codes 
-                SET is_active = FALSE 
-                WHERE code = $1""",
-                code.upper()
+                "UPDATE students SET balance = balance + $1 WHERE id = $2",
+                code_data["points"], user_id
             )
-            
-            return points
+
+            # Фиксируем факт использования кода пользователем
+            await conn.execute(
+                "INSERT INTO user_codes (user_id, code_id) VALUES ($1, $2)",
+                user_id, code_data["id"]
+            )
+
+            return code_data["points"]
+
+
+
+
 
 async def spend_points(user_id: int, code: str) -> bool:
-    """Списание баллов за мерч"""
+    """Списание баллов по коду (если код ещё не использовался этим пользователем).
+       Если код существует, предназначен для списания (is_income = FALSE) и у пользователя достаточно баллов,
+       то баллы списываются, и в таблицу user_codes добавляется запись, фиксирующая использование кода.
+    """
     pool = await get_db()
     async with pool.acquire() as conn:
         async with conn.transaction():
-            merch_data = await conn.fetchrow(
-                """SELECT cost FROM merch 
-                WHERE code = $1 AND used = FALSE""",
+            # Получаем данные кода из таблицы codes
+            code_data = await conn.fetchrow(
+                "SELECT id, points, is_income FROM codes WHERE code = $1",
                 code.upper()
             )
-            
-            if not merch_data:
+            # Если код не найден или предназначен для пополнения, выходим
+            if not code_data or code_data["is_income"]:
                 return False
-            
-            cost = merch_data['cost']
+
+            # Проверяем, использовал ли пользователь этот код ранее (запись в user_codes отсутствует)
+            is_used = await conn.fetchrow(
+                "SELECT 1 FROM user_codes WHERE user_id = $1 AND code_id = $2",
+                user_id, code_data["id"]
+            )
+            if is_used:
+                return False  # Код уже был использован этим пользователем
+
+            # Проверяем, достаточно ли баллов у пользователя для списания
             balance = await get_balance(user_id)
-            
-            if balance < cost:
+            if balance < code_data["points"]:
                 return False
-            
+
+            # Списываем баллы: обновляем баланс студента
             await conn.execute(
-                """UPDATE students 
-                SET balance = balance - $1 
-                WHERE id = $2""",
-                cost, user_id
+                "UPDATE students SET balance = balance - $1 WHERE id = $2",
+                code_data["points"], user_id
             )
-            
+
+            # Фиксируем использование кода: создаём запись в user_codes
             await conn.execute(
-                """UPDATE merch 
-                SET used = TRUE 
-                WHERE code = $1""",
-                code.upper()
+                "INSERT INTO user_codes (user_id, code_id) VALUES ($1, $2)",
+                user_id, code_data["id"]
             )
-            
+
             return True
 
-async def get_top_students(limit: int = 10) -> List[Dict]:
-    """Получение топа студентов"""
-    pool = await get_db()
-    async with pool.acquire() as conn:
-        records = await conn.fetch(
-            """SELECT name, balance 
-            FROM students 
-            ORDER BY balance DESC 
-            LIMIT $1""",
-            limit
-        )
-        return [dict(r) for r in records]
+
 
 async def add_admin(user_id: int):
     """Добавление администратора"""
@@ -225,28 +241,70 @@ async def send_notification(text: str):
             except Exception as e:
                 logger.error(f"Failed to send message to {student['id']}: {e}")
 
-async def get_all_students_rating() -> List[Dict]:
-    """Полный рейтинг студентов"""
+async def get_all_students_rating(user_id: int, limit: int = 10) -> List[Dict]:
+    """Полный рейтинг студентов с возможностью указать количество первых мест"""
     pool = await get_db()
     async with pool.acquire() as conn:
-        records = await conn.fetch(
-            """SELECT name, balance 
-            FROM students 
-            ORDER BY balance DESC"""
-        )
+        if await is_admin(user_id):
+            # If the user is an admin, return all students
+            records = await conn.fetch(
+                """SELECT name, balance
+                FROM students
+                ORDER BY balance DESC"""
+            )
+        else:
+            # If the user is not an admin, return the top 10 students
+            records = await conn.fetch(
+                """SELECT name, balance
+                FROM students
+                ORDER BY balance DESC
+                LIMIT $1""",
+                limit
+            )
         return [dict(r) for r in records]
 
-async def get_active_codes() -> List[Dict]:
-    """Получение активных кодов"""
+
+
+async def get_codes_usage(event_id: int = None):
+    """Получение кодов с количеством их использований, с возможностью фильтрации по мероприятию"""
     pool = await get_db()
     async with pool.acquire() as conn:
-        records = await conn.fetch(
-            """SELECT c.code, c.points, c.is_income, e.name as event_name 
-            FROM codes c
-            JOIN events e ON c.event_id = e.id
-            WHERE c.is_active = TRUE"""
-        )
-        return [dict(r) for r in records]
+        if event_id is not None:
+            query = """
+                SELECT c.code, e.name AS event_name, c.points, c.is_income, 
+                       COUNT(uc.code_id) AS usage_count
+                FROM codes c
+                JOIN events e ON c.event_id = e.id
+                LEFT JOIN user_codes uc ON c.id = uc.code_id
+                WHERE c.event_id = $1
+                GROUP BY c.id, e.name
+            """
+            rows = await conn.fetch(query, event_id)
+        else:
+            query = """
+                SELECT c.code, e.name AS event_name, c.points, c.is_income, 
+                       COUNT(uc.code_id) AS usage_count
+                FROM codes c
+                JOIN events e ON c.event_id = e.id
+                LEFT JOIN user_codes uc ON c.id = uc.code_id
+                GROUP BY c.id, e.name
+            """
+            rows = await conn.fetch(query)
+
+        return [
+            {
+                "code": row["code"],
+                "event_name": row["event_name"],
+                "points": row["points"],
+                "is_income": row["is_income"],
+                "usage_count": row["usage_count"]
+            }
+            for row in rows
+        ]
+
+
+
+
 
 async def add_event(name: str):
     """Добавление мероприятия"""
@@ -275,17 +333,23 @@ async def get_events(event_id: Optional[int] = None) -> Union[Dict, List[Dict]]:
         return [dict(r) for r in records]
 
 async def add_code_to_event(event_id: int, code: str, points: int, is_income: bool):
-    """Добавление кода к мероприятию"""
+    """Добавление кода к мероприятию.
+       Код сохраняется в таблице codes и не считается использованным до момента применения.
+    """
     pool = await get_db()
     async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute(
-                """INSERT INTO codes 
-                (event_id, code, points, is_income, is_active)
-                VALUES ($1, $2, $3, $4, TRUE)
-                ON CONFLICT (code) DO NOTHING""",
+                """
+                INSERT INTO codes (event_id, code, points, is_income)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (code) DO NOTHING
+                """,
                 event_id, code.upper(), points, is_income
             )
+            return {"status": "success", "message": "Код успешно добавлен."}
+
+
 
 async def check_code_exists(code: str) -> bool:
     """Проверка существования кода"""
@@ -303,3 +367,31 @@ async def send_message(user_id: int, text: str):
         await bot.send_message(user_id, text)
     except Exception as e:
         logger.error(f"Failed to send message to {user_id}: {e}")
+
+async def delete_code(code: str):
+    """Удаление кода из базы данных"""
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """DELETE FROM codes
+                   WHERE code = $1""",
+                code.upper()
+            )
+
+async def delete_event(event_id: int):
+    """Удаление мероприятия и всех связанных с ним кодов из базы данных"""
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Удаление всех кодов, связанных с мероприятием
+            await conn.execute(
+                """DELETE FROM codes WHERE event_id = $1""",
+                event_id
+            )
+            # Удаление самого мероприятия
+            await conn.execute(
+                """DELETE FROM events WHERE id = $1""",
+                event_id
+            )
+

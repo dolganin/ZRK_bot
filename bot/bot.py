@@ -2,41 +2,32 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import BotCommand, BotCommandScopeChat, Message
-from aiogram.filters import Command, CommandStart  # Добавляем нужные фильтры
+from aiogram.filters import Command, CommandStart
 from core.bot import bot   # Инициализация бота
 from core.dp import dp     # Инициализация диспетчера
-from utils.database import init_db, is_admin
+from utils.database import init_db
 from aiogram import Router
 
 logging.basicConfig(level=logging.INFO)
 
 router = Router()
 
-async def set_commands_for_chat(chat_id: int):
+async def set_commands_for_chat():
+    # Теперь все пользователи получат одинаковые команды
     base_commands = [
-        BotCommand(command="/start", description="Начать"),
-        BotCommand(command="/code", description="Ввести код для начисления баллов"),
-        BotCommand(command="/spend", description="Ввести код для списания баллов"),
-        BotCommand(command="/top", description="Посмотреть топ студентов")
+        BotCommand(command="/help", description="Вывести справку помощи"),
+        BotCommand(command="/home", description="Вернуться домой")
+        # Можно добавить другие команды, которые будут доступны всем
     ]
     
-    if await is_admin(chat_id):
-        base_commands.append(BotCommand(command="/add_admin", description="Добавить администратора"))
-        base_commands.append(BotCommand(command="/notify", description="Отправить уведомление студентам"))
-    
-    await bot.set_my_commands(base_commands, scope=BotCommandScopeChat(chat_id=chat_id))
-
-# Используем новый синтаксис с Command
-@router.message(CommandStart())
-async def cmd_start(message: Message):
-    chat_id = message.chat.id
-    await set_commands_for_chat(chat_id)
-    await message.answer("Добро пожаловать! Команды обновлены в зависимости от ваших прав.")
+    await bot.set_my_commands(base_commands)
 
 async def main():
     print("🔄 Настройка базы данных...")
     await init_db()
     print("🚀 База данных готова!")
+
+    await set_commands_for_chat()
     
     dp.include_router(router)
     
