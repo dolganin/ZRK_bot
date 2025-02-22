@@ -126,7 +126,7 @@ async def process_faculty(message: types.Message, state: FSMContext):
            "Теперь ты можешь участвовать в Карьерном квесте НГУ 2025! 🚀"
     await message.answer(text, reply_markup=main_menu())
     
-    state.clear()
+    await state.clear()
 
 # Команда /home - возвращает пользователя в главное меню
 @router.message(Command("home"))
