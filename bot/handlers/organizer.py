@@ -114,7 +114,7 @@ async def handle_rating_limit(message: types.Message, state: FSMContext):
         rating_text += f"{place}. {student['name']} - {student['balance']}\n"
     
     await message.answer(rating_text, reply_markup=organizer_menu())
-    await state.set_state(OrganizerStates.organizer_menu)
+    await state.clear()
 
 @router.message(F.text == "📢 Уведомление")
 async def start_notify(message: types.Message, state: FSMContext):
