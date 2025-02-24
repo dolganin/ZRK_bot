@@ -126,9 +126,37 @@ async def start_notify(message: types.Message, state: FSMContext):
     await state.set_state(OrganizerStates.waiting_for_notification)
 
 @router.message(OrganizerStates.waiting_for_notification)
-async def process_notify(message: types.Message, state: FSMContext):
-    await send_notification(message.text)
-    await message.answer("✅ Уведомление отправлено!", reply_markup=organizer_menu())
+async def confirm_notify(message: types.Message, state: FSMContext):
+    await state.update_data(notification_text=message.text)
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ ДА, отправить ВСЕМ", callback_data="confirm_send_notification")],
+        [InlineKeyboardButton(text="❌ НЕТ, отмена", callback_data="cancel_send_notification")]
+    ])
+
+    await message.answer(
+        "⚠️ *Подтверждение отправки уведомления*\n\n"
+        "Вы собираетесь отправить следующее уведомление *ВСЕМ* пользователям:\n\n"
+        f"📢 _{message.text}_\n\n"
+        "*Вы уверены, что хотите отправить это уведомление?*",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+    await state.set_state(OrganizerStates.confirming_notification)
+
+@router.callback_query(F.data == "confirm_send_notification")
+async def process_confirm_send_notification(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    notification_text = data.get("notification_text", "Нет текста")
+    
+    await send_notification(notification_text)  # Функция отправки уведомления всем пользователям
+
+    await callback.message.edit_text("✅ Уведомление отправлено всем пользователям!", reply_markup=None)
+    await state.clear()
+
+@router.callback_query(F.data == "cancel_send_notification")
+async def process_cancel_send_notification(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("❌ Отправка уведомления отменена.", reply_markup=None)
     await state.clear()
 
 @router.message(F.text == "🔑 Создать код")
