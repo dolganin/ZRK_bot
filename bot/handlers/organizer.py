@@ -86,11 +86,10 @@ async def show_rating(message: types.Message, state: FSMContext):
     await state.set_state(OrganizerStates.waiting_for_rating_limit)
 
 # Обработчик для приема сообщения с количеством студентов
-@router.message(state=OrganizerStates.waiting_for_rating_limit)
+@router.message(OrganizerStates.waiting_for_rating_limit)
 async def handle_rating_limit(message: types.Message, state: FSMContext):
     # Удаляем клавиатуру
     await message.answer(types.ReplyKeyboardRemove())
-    
     # Обрабатываем выбор пользователя
     if message.text == "10 студентов":
         limit = 10
