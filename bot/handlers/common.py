@@ -172,7 +172,7 @@ async def cmd_home(message: types.Message):
     keyboard = organizer_menu() if is_user_admin else main_menu()
 
     # Путь к картинке
-    image_path = './hello.jpg'
+    image_path = "./hello.jpg"
 
     with open(image_path, "rb") as file:
         photo = BufferedInputFile(file.read(), filename=image_path)
