@@ -46,6 +46,7 @@ class OrganizerStates(StatesGroup):
     waiting_for_event_action = State ()
     waiting_for_event_to_delete = State ()
     waiting_for_rating_limit = State()
+    confirming_notification = State ()
 
 # Генерация уникальных кодов
 def generate_random_code(length: int = 10) -> str:
