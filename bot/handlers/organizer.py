@@ -61,10 +61,19 @@ async def generate_unique_code(length: int = 10) -> str:
 # Основные обработчики
 
 def rating_menu():
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add(KeyboardButton("10 студентов"))
-    markup.add(KeyboardButton("50 студентов"))
-    markup.add(KeyboardButton("Весь список"))
+    # Создаем структуру клавиатуры с явным указанием рядов кнопок
+    buttons = [
+        [KeyboardButton(text="10 студентов")],
+        [KeyboardButton(text="50 студентов")],
+        [KeyboardButton(text="Весь список")]
+    ]
+    
+    # Передаем кнопки в параметр keyboard
+    markup = ReplyKeyboardMarkup(
+        keyboard=buttons,
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
     return markup
 
 @router.message(F.text == "📊 Рейтинг")
