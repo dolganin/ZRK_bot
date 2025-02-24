@@ -168,24 +168,24 @@ async def cmd_home(message: types.Message):
         "🔹 Посмотри доступные мероприятия в программе и начинай зарабатывать баллы! 🏆"
     )
 
-    # Путь к картинке
-    image_path = 'hello.jpg'
-
-    with open(image_path, "rb") as file:
-        photo = BufferedInputFile(file.read(), filename="hello.jpg")
-
     # Определяем клавиатуру в зависимости от типа пользователя
     keyboard = organizer_menu() if is_user_admin else main_menu()
 
-    # Отправка текста с картинкой в одном сообщении
-    await bot.send_photo(
-        chat_id=message.chat.id,  # Указываем ID чата
-        photo=photo,              # Фото
-        caption=text,             # Текст под фото
-        reply_markup=keyboard,    # Клавиатура
-        parse_mode="Markdown",    # Парсинг Markdown
-        disable_web_page_preview=True  # Отключение превью ссылок
-    )
+    # Путь к картинке
+    image_path = './hello.jpg'
+
+    with open(image_path, "rb") as file:
+        photo = BufferedInputFile(file.read(), filename=image_path)
+
+        # Отправка текста с картинкой в одном сообщении
+        await bot.send_photo(
+            chat_id=message.chat.id,  # Указываем ID чата
+            photo=photo,              # Фото
+            caption=text,             # Текст под фото
+            reply_markup=keyboard,    # Клавиатура
+            parse_mode="Markdown",    # Парсинг Markdown
+            disable_web_page_preview=True  # Отключение превью ссылок
+        )
 
 # Обработчик неизвестных команд
 @router.message()
