@@ -7,7 +7,6 @@ from keyboards.student_keyboards import main_menu
 from utils.database import is_admin, get_balance, register_student, is_user_registered
 from keyboards.organizer_keyboards import organizer_menu
 
-
 import logging
 
 logging.basicConfig(level=logging.DEBUG)
@@ -169,7 +168,7 @@ async def cmd_home(message: types.Message):
     )
 
     # Путь к картинке
-    image_path = 'bot/resources/hello.jpg'
+    image_path = '../resources/hello.jpg'
     photo = InputFile(image_path)
 
     # Определяем клавиатуру в зависимости от типа пользователя
