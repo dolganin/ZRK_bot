@@ -184,7 +184,6 @@ async def cmd_home(message: types.Message):
             caption=text,             # Текст под фото
             reply_markup=keyboard,    # Клавиатура
             parse_mode="Markdown",    # Парсинг Markdown
-            disable_web_page_preview=True  # Отключение превью ссылок
         )
 
 # Обработчик неизвестных команд
