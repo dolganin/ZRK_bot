@@ -401,3 +401,14 @@ async def delete_event(event_id: int):
                 event_id
             )
 
+async def is_user_registered(user_id: int) -> bool:
+    """Проверка, зарегистрирован ли пользователь по его ID"""
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        # Выполняем запрос для проверки существования пользователя по ID
+        result = await conn.fetchval(
+            "SELECT 1 FROM students WHERE id = $1",
+            user_id
+        )
+        # Если результат есть, значит пользователь зарегистрирован
+        return result is not None

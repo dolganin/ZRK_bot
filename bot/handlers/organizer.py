@@ -45,6 +45,7 @@ class OrganizerStates(StatesGroup):
     waiting_for_code_to_delete = State ()
     waiting_for_event_action = State ()
     waiting_for_event_to_delete = State ()
+    waiting_for_rating_limit = State()
 
 # Генерация уникальных кодов
 def generate_random_code(length: int = 10) -> str:
@@ -59,14 +60,22 @@ async def generate_unique_code(length: int = 10) -> str:
 
 # Основные обработчики
 
+def rating_menu():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(KeyboardButton("10 студентов"))
+    markup.add(KeyboardButton("50 студентов"))
+    markup.add(KeyboardButton("Весь список"))
+    return markup
+
 @router.message(F.text == "📊 Рейтинг")
-async def show_rating(message: types.Message):
-    students = await get_all_students_rating(message.from_user.id)
-    response = ["🏆 Топ студентов:\n"]
-    for idx, student in enumerate(students, 1):
-        response.append(f"{idx}. {student['name']} - {student['balance']} баллов")
-    
-    await message.answer("\n".join(response), reply_markup=organizer_menu())
+async def show_rating(message: types.Message, state: FSMContext):
+      # Проверка на роль пользователя (например, администратор или обычный пользователь)
+    if not await is_admin(message.from_user.id):
+        await message.answer("❌ У вас нет доступа к этой команде.", reply_markup=main_menu())
+        return
+    # Переводим в состояние выбора количества студентов
+    await message.answer("Выберите, сколько студентов показать:", reply_markup=rating_menu())
+    await state.set_state(OrganizerStates.waiting_for_rating_limit)
 
 @router.message(F.text == "📢 Уведомление")
 async def start_notify(message: types.Message, state: FSMContext):
@@ -201,8 +210,6 @@ async def show_active_codes(message: types.Message):
     await message.answer("\n".join(response), reply_markup=organizer_menu())
 
 
-
-
 # Обработчики для создания кода мероприятия
 @router.message(F.text == "🔑 Код к мероприятию")
 async def cmd_manage_code(message: types.Message, state: FSMContext):
@@ -259,9 +266,12 @@ async def select_action(callback: types.CallbackQuery, state: FSMContext):
             return await callback.message.answer("❌ Нет активных кодов для удаления", reply_markup=organizer_menu())
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(
-                text=f"{code['code']} ({code['points']} баллов, использовано: {code['usage_count']} раз)",
-                callback_data=f"delete_code_{code['code']}")]
+            [
+                InlineKeyboardButton(
+                    text=f"{code['code']} ({code['points']} баллов, использовано: {code['usage_count']} раз, {'Пополнение' if code['is_income'] else 'Списание'})",
+                    callback_data=f"delete_code_{code['code']}"
+                )
+            ]
             for code in codes
         ])
 

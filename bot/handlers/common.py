@@ -2,10 +2,11 @@ from aiogram import Router, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InputFile
 from keyboards.student_keyboards import main_menu
-from utils.database import is_admin, get_balance, register_student
+from utils.database import is_admin, get_balance, register_student, is_user_registered
 from keyboards.organizer_keyboards import organizer_menu
+
 
 import logging
 
@@ -25,6 +26,13 @@ class RegistrationState(StatesGroup):
 async def cmd_start(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     current_state = await state.get_state()  # Получаем текущее состояние пользователя
+
+    # Проверяем, зарегистрирован ли пользователь
+    if await is_user_registered(user_id):
+        # Если пользователь уже зарегистрирован, отправляем сообщение о том, что он зарегистрирован
+        await message.answer("Вы уже зарегистрированы в Карьерном квесте НГУ 2025!")
+        return
+
     # Приветственное сообщение
     text = "Привет! Добро пожаловать в Карьерный квест НГУ 2025! 👋\n\n" \
            "Чтобы начать, нужно зарегистрироваться. Пожалуйста, введи свое ФИО."
@@ -32,6 +40,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     # Переходим в состояние ожидания ФИО
     await message.answer(text)
     await state.set_state(RegistrationState.waiting_for_name)
+
 
 
 @router.message(RegistrationState.waiting_for_name)
@@ -132,9 +141,8 @@ async def process_faculty(message: types.Message, state: FSMContext):
            f"Курс: {course}\n" \
            f"Факультет: {faculty}\n\n" \
            "Теперь ты можешь участвовать в Карьерном квесте НГУ 2025! 🚀"
+    await message.answer(text, reply_markup=main_menu())
     
-    keyboard = organizer_menu() if is_user_admin else main_menu()
-    await message.answer(text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
     await state.clear()
 
 # Команда /home - возвращает пользователя в главное меню
@@ -160,8 +168,15 @@ async def cmd_home(message: types.Message):
         "🔹 Посмотри доступные мероприятия в программе и начинай зарабатывать баллы! 🏆"
     )
 
+    # Путь к картинке
+    image_path = 'bot/resources/hello.jpg'
+    photo = InputFile(image_path)
+
+    # Определяем клавиатуру в зависимости от типа пользователя
     keyboard = organizer_menu() if is_user_admin else main_menu()
-    await message.answer(text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
+
+    # Отправка текста с картинкой в одном сообщении
+    await message.answer_photo(photo, caption=text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
 
 # Обработчик неизвестных команд
 @router.message()
