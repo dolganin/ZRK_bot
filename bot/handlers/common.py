@@ -2,10 +2,11 @@ from aiogram import Router, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile
 from keyboards.student_keyboards import main_menu
 from utils.database import is_admin, get_balance, register_student, is_user_registered
 from keyboards.organizer_keyboards import organizer_menu
+from core.bot import bot
 
 import logging
 
@@ -169,13 +170,22 @@ async def cmd_home(message: types.Message):
 
     # Путь к картинке
     image_path = '../resources/hello.jpg'
-    photo = FSInputFile(image_path)
+
+    with open(image_path, "rb") as file:
+        photo = BufferedInputFile(file.read(), filename="hello.jpg")
 
     # Определяем клавиатуру в зависимости от типа пользователя
     keyboard = organizer_menu() if is_user_admin else main_menu()
 
     # Отправка текста с картинкой в одном сообщении
-    await message.answer_photo(photo, caption=text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
+    await bot.send_photo(
+        chat_id=message.chat.id,  # Указываем ID чата
+        photo=photo,              # Фото
+        caption=text,             # Текст под фото
+        reply_markup=keyboard,    # Клавиатура
+        parse_mode="Markdown",    # Парсинг Markdown
+        disable_web_page_preview=True  # Отключение превью ссылок
+    )
 
 # Обработчик неизвестных команд
 @router.message()
