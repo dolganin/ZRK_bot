@@ -2,7 +2,7 @@ from aiogram import Router, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InputFile
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile
 from keyboards.student_keyboards import main_menu
 from utils.database import is_admin, get_balance, register_student, is_user_registered
 from keyboards.organizer_keyboards import organizer_menu
@@ -169,7 +169,7 @@ async def cmd_home(message: types.Message):
 
     # Путь к картинке
     image_path = '../resources/hello.jpg'
-    photo = InputFile(image_path)
+    photo = FSInputFile(image_path)
 
     # Определяем клавиатуру в зависимости от типа пользователя
     keyboard = organizer_menu() if is_user_admin else main_menu()
