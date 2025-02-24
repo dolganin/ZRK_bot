@@ -61,30 +61,63 @@ async def generate_unique_code(length: int = 10) -> str:
 # Основные обработчики
 
 def rating_menu():
-    # Создаем структуру клавиатуры с явным указанием рядов кнопок
     buttons = [
-        [KeyboardButton(text="10 студентов")],
-        [KeyboardButton(text="50 студентов")],
-        [KeyboardButton(text="Весь список")]
+        [types.KeyboardButton(text="10 студентов")],
+        [types.KeyboardButton(text="50 студентов")],
+        [types.KeyboardButton(text="Весь список")]
     ]
-    
-    # Передаем кнопки в параметр keyboard
-    markup = ReplyKeyboardMarkup(
+    markup = types.ReplyKeyboardMarkup(
         keyboard=buttons,
         resize_keyboard=True,
         one_time_keyboard=True
     )
     return markup
 
+# Проверка наStarted по тексту "📊 Рейтинг"
 @router.message(F.text == "📊 Рейтинг")
 async def show_rating(message: types.Message, state: FSMContext):
-      # Проверка на роль пользователя (например, администратор или обычный пользователь)
+    # Проверка на роль пользователя
     if not await is_admin(message.from_user.id):
         await message.answer("❌ У вас нет доступа к этой команде.", reply_markup=main_menu())
         return
-    # Переводим в состояние выбора количества студентов
+    
+    # Отправляем меню выбора и устанавливаем состояние ожидания
     await message.answer("Выберите, сколько студентов показать:", reply_markup=rating_menu())
     await state.set_state(OrganizerStates.waiting_for_rating_limit)
+
+# Обработчик для приема сообщения с количеством студентов
+@router.message(state=OrganizerStates.waiting_for_rating_limit)
+async def handle_rating_limit(message: types.Message, state: FSMContext):
+    # Удаляем клавиатуру
+    await message.answer(types.ReplyKeyboardRemove())
+    
+    # Обрабатываем выбор пользователя
+    if message.text == "10 студентов":
+        limit = 10
+    elif message.text == "50 студентов":
+        limit = 50
+    elif message.text == "Весь список":
+        limit = None
+    else:
+        # Если введено не предVR 医 kolebctime значение
+        await message.answer("❌ Неправильный выбор!", reply_markup=rating_menu())
+        return
+    
+    #\P_good привлекаем функцию для получения рейтинга
+    rating = await get_rating(limit)
+    
+    # Если лимит установлен, показываем только N студентов
+    if limit:
+        rating_text = f"Рейтинг (топ {limit} студентов):\n"
+    else:
+        rating_text = "Полный рейтинг:\n"
+    
+    # Формируем строку для отображения рейтинга
+    for place, student in enumerate(rating, 1):
+        rating_text += f"{place}. {student['name']} - {student['points']}\n"
+    
+    await message.answer(rating_text, reply_markup=organizer_menu())
+    await state.set_state(OrganizerStates.organizer_menu)
 
 @router.message(F.text == "📢 Уведомление")
 async def start_notify(message: types.Message, state: FSMContext):
