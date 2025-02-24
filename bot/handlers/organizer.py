@@ -105,13 +105,13 @@ async def handle_rating_limit(message: types.Message, state: FSMContext):
     
     # Если лимит установлен, показываем только N студентов
     if limit:
-        rating_text = f"Рейтинг (топ {limit} студентов):\n"
+        rating_text = f"🔥Рейтинг (топ {limit} студентов):\n"
     else:
-        rating_text = "Полный рейтинг:\n"
+        rating_text = "🔥Полный рейтинг:\n"
     
     # Формируем строку для отображения рейтинга
     for place, student in enumerate(rating, 1):
-        rating_text += f"{place}. {student['name']} - {student['points']}\n"
+        rating_text += f"{place}. {student['name']} - {student['balance']}\n"
     
     await message.answer(rating_text, reply_markup=organizer_menu())
     await state.set_state(OrganizerStates.organizer_menu)
