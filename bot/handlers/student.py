@@ -3,6 +3,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from keyboards.organizer_keyboards import organizer_menu
 from utils.database import (
     get_balance, 
     add_points, 
@@ -176,6 +177,7 @@ async def keyboard_map(message: types.Message):
 @router.message(Command("help"))
 async def cmd_help(message: types.Message):
     user_id = message.from_user.id
+    is_user_admin = await is_admin(user_id)  # Проверяем, является ли пользователь админом
     if await is_admin(user_id):
         help_text = (
             "🛠 Админская справка:\n\n"
@@ -200,4 +202,6 @@ async def cmd_help(message: types.Message):
             "/top — просмотр рейтинга\n"
             "\nИспользуйте клавиатуру для быстрого доступа к функциям бота."
         )
-    await message.answer(help_text, parse_mode="HTML", reply_markup=main_menu())
+
+    keyboard = organizer_menu() if is_user_admin else main_menu()
+    await message.answer(help_text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)

@@ -132,8 +132,9 @@ async def process_faculty(message: types.Message, state: FSMContext):
            f"Курс: {course}\n" \
            f"Факультет: {faculty}\n\n" \
            "Теперь ты можешь участвовать в Карьерном квесте НГУ 2025! 🚀"
-    await message.answer(text, reply_markup=main_menu())
     
+    keyboard = organizer_menu() if is_user_admin else main_menu()
+    await message.answer(text, reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
     await state.clear()
 
 # Команда /home - возвращает пользователя в главное меню
