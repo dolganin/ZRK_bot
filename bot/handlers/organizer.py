@@ -89,7 +89,6 @@ async def show_rating(message: types.Message, state: FSMContext):
 @router.message(OrganizerStates.waiting_for_rating_limit)
 async def handle_rating_limit(message: types.Message, state: FSMContext):
     # Удаляем клавиатуру
-    await message.answer(types.ReplyKeyboardRemove())
     # Обрабатываем выбор пользователя
     if message.text == "10 студентов":
         limit = 10
@@ -102,8 +101,7 @@ async def handle_rating_limit(message: types.Message, state: FSMContext):
         await message.answer("❌ Неправильный выбор!", reply_markup=rating_menu())
         return
     
-    #\P_good привлекаем функцию для получения рейтинга
-    rating = await get_rating(limit)
+    rating = await get_all_students_rating(limit)
     
     # Если лимит установлен, показываем только N студентов
     if limit:
