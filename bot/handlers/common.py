@@ -169,7 +169,7 @@ async def cmd_home(message: types.Message):
     )
 
     # Путь к картинке
-    image_path = '../resources/hello.jpg'
+    image_path = 'resources/hello.jpg'
 
     with open(image_path, "rb") as file:
         photo = BufferedInputFile(file.read(), filename="hello.jpg")
