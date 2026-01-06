@@ -39,3 +39,35 @@ CREATE TABLE IF NOT EXISTS user_codes (
     used_at TIMESTAMP DEFAULT NOW(),  -- Время использования
     PRIMARY KEY (user_id, code_id)  -- Уникальная пара "пользователь-код"
 );
+
+CREATE TABLE IF NOT EXISTS products (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    price_points INTEGER NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE TABLE IF NOT EXISTS orders (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    total_points INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS order_items (
+    order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    qty INTEGER NOT NULL,
+    points_each INTEGER NOT NULL,
+    PRIMARY KEY (order_id, product_id)
+);
+
+CREATE TABLE IF NOT EXISTS claim_tokens (
+    token TEXT PRIMARY KEY,
+    order_id INTEGER NOT NULL UNIQUE REFERENCES orders(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    expires_at TIMESTAMP NULL,
+    issued_by BIGINT NULL REFERENCES admins(user_id),
+    issued_at TIMESTAMP NULL
+);

@@ -1,58 +1,44 @@
+import logging
 from aiogram import Router, types
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile
-from keyboards.student_keyboards import main_menu
-from utils.database import is_admin, get_balance, register_student, is_user_registered
-from keyboards.organizer_keyboards import organizer_menu
+
 from core.bot import bot
+from keyboards.student_keyboards import main_menu
+from keyboards.organizer_keyboards import organizer_menu
+from utils.database import is_admin, get_balance, register_student, is_user_registered
 
-import logging
-
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = Router()
 
-# Стейт-машина для регистрации
 class RegistrationState(StatesGroup):
     waiting_for_name = State()
     waiting_for_course = State()
     waiting_for_faculty = State()
 
-# Команда /start - приветствие и запрос регистрации
-@router.message(Command("start"))
+@router.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-    current_state = await state.get_state()  # Получаем текущее состояние пользователя
-
-    # Проверяем, зарегистрирован ли пользователь
     if await is_user_registered(user_id):
-        # Если пользователь уже зарегистрирован, отправляем сообщение о том, что он зарегистрирован
-        await message.answer("Вы уже зарегистрированы в Карьерном квесте НГУ 2025!")
+        await message.answer("Вы уже зарегистрированы в Карьерном квесте НГУ 2025!", reply_markup=main_menu())
         return
 
-    # Приветственное сообщение
-    text = "Привет! Добро пожаловать в Карьерный квест НГУ 2025! 👋\n\n" \
-           "Чтобы начать, нужно зарегистрироваться. Пожалуйста, введи свое ФИО."
-
-    # Переходим в состояние ожидания ФИО
+    text = (
+        "Привет! Добро пожаловать в Карьерный квест НГУ 2025! 👋\n\n"
+        "Чтобы начать, нужно зарегистрироваться. Пожалуйста, введи свое ФИО."
+    )
     await message.answer(text)
     await state.set_state(RegistrationState.waiting_for_name)
 
-
-
 @router.message(RegistrationState.waiting_for_name)
 async def process_name(message: types.Message, state: FSMContext):
-    # Сохраняем введенное ФИО
     user_name = message.text
     await state.update_data(name=user_name)
 
-    # Запрашиваем курс с кнопками
-    text = "Отлично, теперь выбери свой курс:"
-
-    # Создаем клавиатуру для курсов
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="1 курс"), KeyboardButton(text="2 курс")],
@@ -64,16 +50,12 @@ async def process_name(message: types.Message, state: FSMContext):
         one_time_keyboard=True
     )
 
-    await message.answer(text, reply_markup=keyboard)
+    await message.answer("Отлично, теперь выбери свой курс:", reply_markup=keyboard)
     await state.set_state(RegistrationState.waiting_for_course)
 
-
-# Обработка курса
 @router.message(RegistrationState.waiting_for_course)
 async def process_course(message: types.Message, state: FSMContext):
     course = message.text
-
-    # Проверяем, что курс правильный
     valid_courses = [
         "1 курс", "2 курс", "3 курс", "4 курс", "5 курс",
         "Магистратура", "Аспирантура", "Выпускник"
@@ -82,10 +64,8 @@ async def process_course(message: types.Message, state: FSMContext):
         await message.answer("Пожалуйста, выбери курс из предложенных вариантов.")
         return
 
-    # Сохраняем курс
     await state.update_data(course=course)
 
-    # Создаем клавиатуру для факультетов
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="ИИР"), KeyboardButton(text="ФЕН")],
@@ -98,13 +78,10 @@ async def process_course(message: types.Message, state: FSMContext):
         resize_keyboard=True,
         one_time_keyboard=True
     )
-    
-    text = "Теперь выбери факультет:"
-    await message.answer(text, reply_markup=keyboard)
+
+    await message.answer("Теперь выбери факультет:", reply_markup=keyboard)
     await state.set_state(RegistrationState.waiting_for_faculty)
 
-
-# Обработка факультета
 @router.message(RegistrationState.waiting_for_faculty)
 async def process_faculty(message: types.Message, state: FSMContext):
     faculty = message.text
@@ -112,47 +89,39 @@ async def process_faculty(message: types.Message, state: FSMContext):
         "ИИР", "ФЕН", "ФФ", "ИМПЗ", "ФИТ", "ММФ",
         "ГИ", "ФИЯ", "ИФП", "ГГФ", "ЭФ", "ПИШ"
     ]
-    
+
     if faculty not in valid_faculties:
         await message.answer("Пожалуйста, выбери факультет из предложенных вариантов.")
         return
 
-    # Сохраняем факультет
     await state.update_data(faculty=faculty)
 
-    # Получаем все данные
     user_data = await state.get_data()
-    name = user_data['name']
-    course = user_data['course']
-    faculty = user_data['faculty']
+    name = user_data["name"]
+    course = user_data["course"]
 
-    # Сохраняем данные в базу данных
     user_id = message.from_user.id
     username = message.from_user.username
 
-    logger.info(user_id)
-
     await register_student(user_id, name, username, course, faculty)
 
-    # Подтверждаем регистрацию
-    text = f"Регистрация завершена! 🎉\n\n" \
-           f"Ты зарегистрирован как:\n\n" \
-           f"ФИО: {name}\n" \
-           f"Курс: {course}\n" \
-           f"Факультет: {faculty}\n\n" \
-           "Теперь ты можешь участвовать в Карьерном квесте НГУ 2025! 🚀"
+    text = (
+        "Регистрация завершена! 🎉\n\n"
+        "Ты зарегистрирован как:\n\n"
+        f"ФИО: {name}\n"
+        f"Курс: {course}\n"
+        f"Факультет: {faculty}\n\n"
+        "Теперь ты можешь участвовать в Карьерном квесте НГУ 2025! 🚀"
+    )
     await message.answer(text, reply_markup=main_menu())
-    
     await state.clear()
 
-# Команда /home - возвращает пользователя в главное меню
 @router.message(Command("home"))
 async def cmd_home(message: types.Message):
     user_id = message.from_user.id
-    balance = await get_balance(user_id)  # Получаем баланс пользователя
-    is_user_admin = await is_admin(user_id)  # Проверяем, является ли пользователь админом
+    balance = await get_balance(user_id)
+    admin = await is_admin(user_id)
 
-    # Текст сообщения
     text = (
         "Привет, это Карьерный квест НГУ 2025 👋\n\n"
         f"🏅 Твой баланс: *{balance}* баллов\n\n"
@@ -167,25 +136,19 @@ async def cmd_home(message: types.Message):
         "🔹 Посмотри доступные мероприятия в программе и начинай зарабатывать баллы! 🏆"
     )
 
-    # Определяем клавиатуру в зависимости от типа пользователя
-    keyboard = organizer_menu() if is_user_admin else main_menu()
-
-    # Путь к картинке
+    keyboard = organizer_menu() if admin else main_menu()
     image_path = "./hello.jpg"
 
     with open(image_path, "rb") as file:
         photo = BufferedInputFile(file.read(), filename=image_path)
-
-        # Отправка текста с картинкой в одном сообщении
         await bot.send_photo(
-            chat_id=message.chat.id,  # Указываем ID чата
-            photo=photo,              # Фото
-            caption=text,             # Текст под фото
-            reply_markup=keyboard,    # Клавиатура
-            parse_mode="Markdown",    # Парсинг Markdown
+            chat_id=message.chat.id,
+            photo=photo,
+            caption=text,
+            reply_markup=keyboard,
+            parse_mode="Markdown",
         )
 
-# Обработчик неизвестных команд
 @router.message()
 async def unknown_command(message: types.Message):
-    await message.answer("❌ Неизвестная команда. Используйте меню или команду /help.")
+    await message.answer("❌ Неизвестная команда. Используйте меню или команду /help.", reply_markup=main_menu())

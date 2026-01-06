@@ -66,6 +66,10 @@ async def init_db():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         
+        from utils.shop_db import seed_products_if_empty
+        await seed_products_if_empty()
+
+        
         logger.info("Tables created successfully")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
