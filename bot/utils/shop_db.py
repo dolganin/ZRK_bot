@@ -160,3 +160,32 @@ async def checkout_order(user_id: int):
             )
             new_balance = balance - total
             return {"ok": True, "order_id": order_id, "total": total, "balance": new_balance}
+
+async def create_product(name: str, price_points: int):
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            "INSERT INTO products(name, price_points, is_active) VALUES ($1, $2, TRUE) RETURNING id",
+            name.strip(), int(price_points)
+        )
+
+async def list_products(include_inactive: bool = False):
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        if include_inactive:
+            rows = await conn.fetch(
+                "SELECT id, name, price_points, is_active FROM products ORDER BY id ASC"
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT id, name, price_points, is_active FROM products WHERE is_active = TRUE ORDER BY id ASC"
+            )
+        return [dict(r) for r in rows]
+
+async def set_product_active(product_id: int, is_active: bool):
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE products SET is_active = $1 WHERE id = $2",
+            bool(is_active), int(product_id)
+        )
