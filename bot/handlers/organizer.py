@@ -1,10 +1,14 @@
 import secrets
+import uuid
 import string
+import os
+
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
 
 from keyboards.organizer_keyboards import organizer_menu, rating_menu
 from keyboards.student_keyboards import main_menu
@@ -21,6 +25,12 @@ from utils.database import (
     delete_code,
     delete_event
 )
+from utils.shop_db import (
+    set_product_main_image, 
+    update_product, 
+    set_product_active, 
+    get_product
+    )
 
 router = Router()
 
@@ -38,6 +48,11 @@ class OrganizerStates(StatesGroup):
     waiting_for_code_to_delete = State()
     waiting_for_product_name = State()
     waiting_for_product_price = State()
+    waiting_for_product_photo = State()
+    waiting_for_product_stock = State()
+    waiting_for_product_edit_pick = State()
+    waiting_for_product_edit_value = State()
+
 
 def generate_random_code(length: int = 10) -> str:
     characters = string.ascii_letters + string.digits
@@ -181,8 +196,9 @@ async def products_menu(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
         return
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Добавить товар", callback_data="org:prod:add")],
-        [InlineKeyboardButton(text="📃 Список товаров", callback_data="org:prod:list")]
+    [InlineKeyboardButton(text="➕ Добавить товар", callback_data="org:prod:add")],
+    [InlineKeyboardButton(text="✏️ Редактировать", callback_data="org:prod:edit")],
+    [InlineKeyboardButton(text="📃 Список товаров", callback_data="org:prod:list")]
     ])
     await message.answer("Управление товарами:", reply_markup=kb)
 
@@ -479,12 +495,51 @@ async def prod_price(message: types.Message, state: FSMContext):
         await message.answer("Цена должна быть целым числом > 0. Введите снова:")
         return
 
+    await state.update_data(product_price=price)
+
+    await message.answer("Введите остаток (целое число >= 0):")
+    await state.set_state(OrganizerStates.waiting_for_product_stock)
+
+
+@router.message(OrganizerStates.waiting_for_product_stock)
+async def prod_stock(message: types.Message, state: FSMContext):
+    if not await ensure_admin(message):
+        await state.clear()
+        return
+    try:
+        stock = int(message.text)
+        if stock < 0:
+            raise ValueError
+    except Exception:
+        await message.answer("Остаток должен быть целым числом >= 0. Введите снова:")
+        return
+
     data = await state.get_data()
     name = data["product_name"]
+    price = int(data["product_price"])
 
-    pid = await create_product(name=name, price_points=price)
-    await message.answer(f"✅ Товар добавлен: {name} — {price} баллов (id={pid})", reply_markup=organizer_menu())
+    pid = await create_product(name=name, price_points=price, stock=stock)
+    await state.update_data(product_id=pid)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭ Пропустить", callback_data="org:prod:photo:skip")]
+    ])
+    await message.answer(
+        f"✅ Товар добавлен: {name} — {price} баллов | остаток: {stock} (id={pid})\n\nТеперь отправьте фото товара.",
+        reply_markup=kb
+    )
+    await state.set_state(OrganizerStates.waiting_for_product_photo)
+
+
+@router.callback_query(OrganizerStates.waiting_for_product_photo, F.data == "org:prod:photo:skip")
+async def prod_photo_skip(call: types.CallbackQuery, state: FSMContext):
+    if not await ensure_admin_cb(call):
+        await state.clear()
+        return
+    await call.message.answer("Ок, без фото.", reply_markup=organizer_menu())
     await state.clear()
+    await call.answer()
+
 
 @router.callback_query(F.data == "org:prod:list")
 async def prod_list(call: types.CallbackQuery):
@@ -501,3 +556,180 @@ async def prod_list(call: types.CallbackQuery):
         lines.append(f"{status} {p['id']}. {p['name']} — {p['price_points']} баллов")
     await call.message.answer("\n".join(lines), reply_markup=organizer_menu())
     await call.answer()
+
+@router.message(OrganizerStates.waiting_for_product_photo)
+async def prod_photo(message: types.Message, state: FSMContext):
+    if not await ensure_admin(message):
+        await state.clear()
+        return
+
+    if not message.photo:
+        await message.answer("Пришлите фото (не файлом). Или нажмите «Пропустить».")
+        return
+
+    data = await state.get_data()
+    product_id = int(data["product_id"])
+
+    p = message.photo[-1]
+    telegram_file_id = p.file_id
+    telegram_file_unique_id = p.file_unique_id
+
+    file = await message.bot.get_file(telegram_file_id)
+
+    folder = f"media/products/{product_id}"
+    os.makedirs(folder, exist_ok=True)
+
+    filename = f"{uuid.uuid4().hex}.jpg"
+    path = f"{folder}/{filename}"
+
+    await message.bot.download_file(file.file_path, destination=path)
+
+    stat = os.stat(path)
+
+    await set_product_main_image(
+        product_id=product_id,
+        telegram_file_id=telegram_file_id,
+        telegram_file_unique_id=telegram_file_unique_id,
+        storage_path=path,
+        mime="image/jpeg",
+        size_bytes=stat.st_size,
+        width=p.width,
+        height=p.height
+    )
+
+    await message.answer("🖼 Фото сохранено и привязано к товару.", reply_markup=organizer_menu())
+    await state.clear()
+
+
+@router.callback_query(F.data == "org:prod:edit")
+async def prod_edit(call: types.CallbackQuery, state: FSMContext):
+    if not await ensure_admin_cb(call):
+        return
+
+    items = await list_products(include_inactive=True)
+    if not items:
+        await call.message.answer("Товаров нет.", reply_markup=organizer_menu())
+        await call.answer()
+        return
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"{'✅' if p['is_active'] else '🚫'} {p['id']}. {p['name']}",
+            callback_data=f"org:prod:edit:pick:{p['id']}"
+        )]
+        for p in items
+    ])
+
+    await call.message.answer("Выберите товар для редактирования:", reply_markup=kb)
+    await state.set_state(OrganizerStates.waiting_for_product_edit_pick)
+    await call.answer()
+
+@router.callback_query(OrganizerStates.waiting_for_product_edit_pick, F.data.startswith("org:prod:edit:pick:"))
+async def prod_edit_pick(call: types.CallbackQuery, state: FSMContext):
+    if not await ensure_admin_cb(call):
+        await state.clear()
+        return
+
+    product_id = int(call.data.split(":")[-1])
+    p = await get_product(product_id)
+    if not p:
+        await call.message.answer("Товар не найден.", reply_markup=organizer_menu())
+        await state.clear()
+        await call.answer()
+        return
+
+    await state.update_data(edit_product_id=product_id)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Название", callback_data="org:prod:edit:field:name")],
+        [InlineKeyboardButton(text="💰 Цена", callback_data="org:prod:edit:field:price")],
+        [InlineKeyboardButton(text="📦 Остаток", callback_data="org:prod:edit:field:stock")],
+        [InlineKeyboardButton(text="✅ Включить", callback_data="org:prod:edit:field:active:1")],
+        [InlineKeyboardButton(text="🚫 Выключить", callback_data="org:prod:edit:field:active:0")],
+    ])
+
+    await call.message.answer(
+        f"Товар #{p['id']}\nНазвание: {p['name']}\nЦена: {p['price_points']}\nОстаток: {p['stock']}\nАктивен: {p['is_active']}",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@router.callback_query(OrganizerStates.waiting_for_product_edit_pick, F.data.startswith("org:prod:edit:field:"))
+async def prod_edit_field(call: types.CallbackQuery, state: FSMContext):
+    if not await ensure_admin_cb(call):
+        await state.clear()
+        return
+
+    parts = call.data.split(":")
+    field = parts[4]
+
+    data = await state.get_data()
+    product_id = int(data["edit_product_id"])
+
+    if field == "active":
+        is_active = bool(int(parts[5]))
+        await set_product_active(product_id, is_active)
+        await call.message.answer("✅ Обновлено.", reply_markup=organizer_menu())
+        await state.clear()
+        await call.answer()
+        return
+
+    await state.update_data(edit_field=field)
+
+    if field == "name":
+        await call.message.answer("Введите новое название товара:")
+    elif field == "price":
+        await call.message.answer("Введите новую цену (целое число > 0):")
+    elif field == "stock":
+        await call.message.answer("Введите новый остаток (целое число >= 0):")
+
+    await state.set_state(OrganizerStates.waiting_for_product_edit_value)
+    await call.answer()
+
+
+@router.message(OrganizerStates.waiting_for_product_edit_value)
+async def prod_edit_value(message: types.Message, state: FSMContext):
+    if not await ensure_admin(message):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    product_id = int(data["edit_product_id"])
+    field = data["edit_field"]
+
+    if field == "name":
+        name = message.text.strip()
+        if not name:
+            await message.answer("Название не должно быть пустым. Введите снова:")
+            return
+        await update_product(product_id, name=name)
+        await message.answer("✅ Название обновлено.", reply_markup=organizer_menu())
+        await state.clear()
+        return
+
+    if field == "price":
+        try:
+            price = int(message.text)
+            if price <= 0:
+                raise ValueError
+        except Exception:
+            await message.answer("Цена должна быть целым числом > 0. Введите снова:")
+            return
+        await update_product(product_id, price_points=price)
+        await message.answer("✅ Цена обновлена.", reply_markup=organizer_menu())
+        await state.clear()
+        return
+
+    if field == "stock":
+        try:
+            stock = int(message.text)
+            if stock < 0:
+                raise ValueError
+        except Exception:
+            await message.answer("Остаток должен быть целым числом >= 0. Введите снова:")
+            return
+        await update_product(product_id, stock=stock)
+        await message.answer("✅ Остаток обновлён.", reply_markup=organizer_menu())
+        await state.clear()
+        return

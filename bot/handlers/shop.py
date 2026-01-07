@@ -11,7 +11,7 @@ from utils.shop_db import (
     get_order_items,
     calc_order_total,
     checkout_order,
-    get_checked_out_order_id
+    get_checked_out_order_id, get_product_main_image
 )
 from utils.database import get_balance
 
@@ -24,6 +24,7 @@ def render_product_text(product, qty_in_cart: int, balance: int, idx: int, total
         f"💰 Цена: {product['price_points']} баллов\n"
         f"🧺 В корзине: {qty_in_cart}\n\n"
         f"💳 Твой баланс: {balance}"
+        f"📦 Остаток: {product['stock']}\n"
     )
 
 def render_cart_text(items, total: int, balance: int):
@@ -36,13 +37,51 @@ def render_cart_text(items, total: int, balance: int):
     lines.append(f"💳 Твой баланс: {balance}")
     return "\n".join(lines)
 
+async def upsert_product_message(call_or_msg, text: str, kb, photo_file_id: str | None):
+    if isinstance(call_or_msg, types.CallbackQuery):
+        m = call_or_msg.message
+
+        want_photo = bool(photo_file_id)
+        have_photo = bool(getattr(m, "photo", None))
+
+        if want_photo and have_photo:
+            await m.edit_media(
+                media=InputMediaPhoto(media=photo_file_id, caption=text),
+                reply_markup=kb
+            )
+            await call_or_msg.answer()
+            return
+
+        if (not want_photo) and (not have_photo):
+            await m.edit_text(text, reply_markup=kb)
+            await call_or_msg.answer()
+            return
+
+        try:
+            await m.delete()
+        except Exception:
+            pass
+
+        if want_photo:
+            await m.answer_photo(photo=photo_file_id, caption=text, reply_markup=kb)
+        else:
+            await m.answer(text, reply_markup=kb)
+
+        await call_or_msg.answer()
+        return
+
+    if photo_file_id:
+        await call_or_msg.answer_photo(photo=photo_file_id, caption=text, reply_markup=kb)
+    else:
+        await call_or_msg.answer(text, reply_markup=kb)
+
+
 async def show_product(message_or_call, user_id: int, idx: int):
     products = await get_products()
     if not products:
         text = "🛍 Магазин пока пуст"
         if isinstance(message_or_call, types.CallbackQuery):
-            await message_or_call.message.edit_text(text)
-            await message_or_call.answer()
+            await upsert_product_message(message_or_call, text, None, None)
         else:
             await message_or_call.answer(text, reply_markup=main_menu())
         return
@@ -66,11 +105,10 @@ async def show_product(message_or_call, user_id: int, idx: int):
     text = render_product_text(product, qty, balance, idx, len(products))
     kb = shop_item_kb(idx=idx, product_id=product["id"])
 
-    if isinstance(message_or_call, types.CallbackQuery):
-        await message_or_call.message.edit_text(text, reply_markup=kb)
-        await message_or_call.answer()
-    else:
-        await message_or_call.answer(text, reply_markup=kb)
+    img = await get_product_main_image(product["id"])
+    photo_file_id = img["telegram_file_id"] if img else None
+
+    await upsert_product_message(message_or_call, text, kb, photo_file_id)
 
 @router.message(lambda m: m.text == "🛍 Магазин")
 async def shop_open(message: types.Message):
@@ -103,11 +141,14 @@ async def shop_add(call: types.CallbackQuery):
         return
 
     order_id = await get_or_create_draft_order(call.from_user.id)
-    ok = await add_item(order_id, product_id)
-    if not ok:
+    res = await add_item(order_id, product_id)
+    if not res["ok"]:
+        if res["reason"] == "out_of_stock":
+            await call.answer("Товар закончился", show_alert=True)
+            return
         await call.answer("Товар недоступен", show_alert=True)
         return
-    await show_product(call, call.from_user.id, idx)
+
 
 @router.callback_query(lambda c: c.data.startswith("shop:rm:"))
 async def shop_rm(call: types.CallbackQuery):

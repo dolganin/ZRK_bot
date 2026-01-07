@@ -71,3 +71,29 @@ CREATE TABLE IF NOT EXISTS claim_tokens (
     issued_by BIGINT NULL REFERENCES admins(user_id),
     issued_at TIMESTAMP NULL
 );
+
+CREATE TABLE IF NOT EXISTS product_images (
+  id BIGSERIAL PRIMARY KEY,
+  product_id BIGINT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  telegram_file_id TEXT,
+  telegram_file_unique_id TEXT,
+  storage_path TEXT,
+  mime TEXT,
+  size_bytes BIGINT,
+  width INT,
+  height INT,
+  is_main BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_product_images_main
+ON product_images(product_id)
+WHERE is_main = TRUE;
+
+CREATE INDEX IF NOT EXISTS ix_product_images_product
+ON product_images(product_id);
+
+ALTER TABLE products
+ADD COLUMN IF NOT EXISTS stock INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS ix_products_active ON products(is_active);
