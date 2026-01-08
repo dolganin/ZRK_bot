@@ -108,3 +108,19 @@ WHERE is_main = TRUE;
 
 CREATE INDEX IF NOT EXISTS ix_product_images_product
 ON product_images(product_id);
+
+CREATE TABLE IF NOT EXISTS maps (
+  id BIGSERIAL PRIMARY KEY,
+  title TEXT NOT NULL,
+  telegram_file_id TEXT,
+  telegram_file_unique_id TEXT,
+  storage_path TEXT,
+  mime TEXT,
+  size_bytes BIGINT,
+  width INT,
+  height INT,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_maps_active ON maps(is_active);

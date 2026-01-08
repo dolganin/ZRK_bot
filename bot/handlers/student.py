@@ -95,10 +95,6 @@ async def keyboard_program(message: types.Message):
     )
     await send_template(bot, message, "program_text", reply_markup=keyboard)
 
-@router.message(lambda message: message.text == "🗺 Карта")
-async def keyboard_map(message: types.Message):
-    await send_template(bot, message, "map_text", reply_markup=main_menu())
-
 @router.message(Command("help"))
 async def cmd_help(message: types.Message):
     user_id = message.from_user.id
