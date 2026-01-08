@@ -44,6 +44,9 @@ async def redeem_code(user_id: int, code: str) -> Optional[int]:
             )
             if not row:
                 return None
+            
+            if not row["is_income"]:
+                return None
 
             starts_at = row["starts_at"]
             expires_at = row["expires_at"]
@@ -69,15 +72,7 @@ async def redeem_code(user_id: int, code: str) -> Optional[int]:
                 if int(used_total) >= int(max_uses):
                     return None
 
-            delta = int(row["points"]) if row["is_income"] else -int(row["points"])
-
-            if delta < 0:
-                bal = await conn.fetchval("SELECT balance FROM students WHERE id = $1", user_id)
-                if bal is None:
-                    return None
-                if int(bal) < (-delta):
-                    return None
-
+            delta = int(row["points"])
             await conn.execute(
                 "UPDATE students SET balance = balance + $1 WHERE id = $2",
                 delta, user_id
@@ -235,11 +230,6 @@ async def add_points(user_id: int, code: str) -> Optional[int]:
     if delta is None:
         return None
     return delta if delta > 0 else None
-
-
-async def spend_points(user_id: int, code: str) -> bool:
-    delta = await redeem_code(user_id, code)
-    return delta is not None and delta < 0
 
 
 

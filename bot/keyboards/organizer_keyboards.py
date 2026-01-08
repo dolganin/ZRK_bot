@@ -7,6 +7,7 @@ def organizer_menu():
             [KeyboardButton(text="🎯 Мероприятия"), KeyboardButton(text="🔑 Коды мероприятий")],
             [KeyboardButton(text="📜 Активные коды"), KeyboardButton(text="👥 Добавить админа")],
             [KeyboardButton(text="🛒 Товары"), KeyboardButton(text="✏️ Тексты")],
+            [KeyboardButton(text="✅ Выдать заказ")],
         ],
         resize_keyboard=True,
     )

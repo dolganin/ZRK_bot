@@ -23,12 +23,12 @@ from utils.database import (
 router = Router()
 
 TZ = ZoneInfo("Europe/Stockholm")
+UTC = ZoneInfo("UTC")
 
 
 class CodesStates(StatesGroup):
     waiting_for_event_id = State()
     waiting_for_code_points = State()
-    waiting_for_code_type = State()
     waiting_for_code_value = State()
     waiting_for_starts_at = State()
     waiting_for_expires_at = State()
@@ -61,10 +61,12 @@ async def ensure_admin_cb(call: types.CallbackQuery):
         return False
     return True
 
+
 def _dt_to_iso_utc(dt: datetime | None) -> str | None:
     if dt is None:
         return None
-    return dt.astimezone(ZoneInfo("UTC")).isoformat()
+    return dt.astimezone(UTC).isoformat()
+
 
 def _iso_to_dt(s: str | None) -> datetime | None:
     if not s:
@@ -72,10 +74,16 @@ def _iso_to_dt(s: str | None) -> datetime | None:
     return datetime.fromisoformat(s)
 
 
-def _parse_dt(text: str) -> datetime:
+def _parse_dt_local_to_utc(text: str) -> datetime:
     s = text.strip()
     dt = datetime.strptime(s, "%Y-%m-%d %H:%M")
-    return dt.replace(tzinfo=TZ).astimezone(ZoneInfo("UTC"))
+    return dt.replace(tzinfo=TZ).astimezone(UTC)
+
+
+def _fmt_local(dt: datetime | None) -> str:
+    if dt is None:
+        return "-"
+    return dt.astimezone(TZ).strftime("%Y-%m-%d %H:%M")
 
 
 @router.message(Command("codes"))
@@ -88,10 +96,12 @@ async def codes_root(message: types.Message, state: FSMContext):
         await message.answer("❌ Нет мероприятий.", reply_markup=organizer_menu())
         return
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{e['id']}. {e['name']}", callback_data=f"codes:event:{e['id']}")]
-        for e in events
-    ] + [[InlineKeyboardButton(text="⬅️ Назад", callback_data="codes:back")]])
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"{e['id']}. {e['name']}", callback_data=f"codes:event:{e['id']}")]
+            for e in events
+        ] + [[InlineKeyboardButton(text="⬅️ Назад", callback_data="codes:back")]]
+    )
 
     await message.answer("Выберите мероприятие для работы с кодами:", reply_markup=kb)
     await state.set_state(CodesStates.waiting_for_event_id)
@@ -117,7 +127,7 @@ async def codes_event_pick(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(event_id=event_id)
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Создать код", callback_data="codes:add")],
+        [InlineKeyboardButton(text="➕ Создать код (пополнение)", callback_data="codes:add")],
         [InlineKeyboardButton(text="🗑 Удалить код", callback_data="codes:delete")],
         [InlineKeyboardButton(text="📜 Показать коды", callback_data="codes:list")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="codes:root")]
@@ -132,8 +142,7 @@ async def codes_root_back(call: types.CallbackQuery, state: FSMContext):
         await state.clear()
         return
     await state.clear()
-    msg = call.message
-    await codes_root(msg, state)
+    await codes_root(call.message, state)
     await call.answer()
 
 
@@ -147,28 +156,22 @@ async def codes_list(call: types.CallbackQuery, state: FSMContext):
     items = await get_codes_usage(event_id=event_id)
 
     if not items:
-        await call.message.answer("❌ Кодів нет.", reply_markup=organizer_menu())
+        await call.message.answer("❌ Кодов нет.", reply_markup=organizer_menu())
         await call.answer()
         return
 
-    parts = ["🔑 Коды:"]
+    parts = ["🔑 Коды (только пополнение):"]
     for c in items:
-        sign = "➕" if c["is_income"] else "➖"
         st = c.get("starts_at")
         ex = c.get("expires_at")
         mu = c.get("max_uses")
         status = c.get("status")
 
-        def fmt(ts):
-            if ts is None:
-                return "-"
-            return ts.astimezone(TZ).strftime("%Y-%m-%d %H:%M")
-
         parts.append(
             f"\n🔸 {c['code']} ({status})\n"
-            f"{sign} {c['points']} баллов | использований: {c['usage_count']}"
+            f"➕ {c['points']} баллов | использований: {c['usage_count']}"
             + (f" / лимит: {mu}" if mu is not None else "")
-            + f"\n⏳ start: {fmt(st)} | end: {fmt(ex)}"
+            + f"\n⏳ start: {_fmt_local(st)} | end: {_fmt_local(ex)}"
         )
 
     await call.message.answer("\n".join(parts), reply_markup=organizer_menu())
@@ -190,6 +193,7 @@ async def codes_points(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
         await state.clear()
         return
+
     try:
         points = abs(int(message.text))
         if points <= 0:
@@ -200,25 +204,8 @@ async def codes_points(message: types.Message, state: FSMContext):
 
     await state.update_data(points=points)
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Пополнение ➕", callback_data="codes:type:income")],
-        [InlineKeyboardButton(text="Списание ➖", callback_data="codes:type:outcome")],
-    ])
-    await message.answer("Выберите тип операции:", reply_markup=kb)
-    await state.set_state(CodesStates.waiting_for_code_type)
-
-
-@router.callback_query(CodesStates.waiting_for_code_type, F.data.startswith("codes:type:"))
-async def codes_type(call: types.CallbackQuery, state: FSMContext):
-    if not await ensure_admin_cb(call):
-        await state.clear()
-        return
-    is_income = call.data.split(":")[-1] == "income"
-    await state.update_data(is_income=is_income)
-
-    await call.message.answer("Введите код или '-' чтобы сгенерировать:")
+    await message.answer("Введите код или '-' чтобы сгенерировать:")
     await state.set_state(CodesStates.waiting_for_code_value)
-    await call.answer()
 
 
 @router.message(CodesStates.waiting_for_code_value)
@@ -227,7 +214,7 @@ async def codes_value(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    raw = message.text.strip()
+    raw = (message.text or "").strip()
     if raw == "-":
         code = await generate_unique_code()
     else:
@@ -255,20 +242,19 @@ async def codes_starts_at(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    s = message.text.strip().lower()
+    s = (message.text or "").strip().lower()
     if s == "-":
         starts_at = None
     elif s == "now":
-        starts_at = datetime.now(tz=TZ).astimezone(ZoneInfo("UTC"))
+        starts_at = datetime.now(tz=TZ).astimezone(UTC)
     else:
         try:
-            starts_at = _parse_dt(message.text)
+            starts_at = _parse_dt_local_to_utc(message.text)
         except Exception:
             await message.answer("❌ Неверный формат. Нужно YYYY-MM-DD HH:MM или 'now' или '-'")
             return
 
     await state.update_data(starts_at=_dt_to_iso_utc(starts_at))
-
 
     await message.answer(
         "Когда код ПЕРЕСТАНЕТ действовать?\n"
@@ -284,12 +270,12 @@ async def codes_expires_at(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    s = message.text.strip().lower()
+    s = (message.text or "").strip().lower()
     if s == "-":
         expires_at = None
     else:
         try:
-            expires_at = _parse_dt(message.text)
+            expires_at = _parse_dt_local_to_utc(message.text)
         except Exception:
             await message.answer("❌ Неверный формат. Нужно YYYY-MM-DD HH:MM или '-'")
             return
@@ -299,7 +285,6 @@ async def codes_expires_at(message: types.Message, state: FSMContext):
     if starts_at is not None and expires_at is not None and expires_at <= starts_at:
         await message.answer("❌ expires_at должен быть позже starts_at. Введите снова:")
         return
-
 
     await state.update_data(expires_at=_dt_to_iso_utc(expires_at))
 
@@ -316,7 +301,7 @@ async def codes_max_uses(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    s = message.text.strip().lower()
+    s = (message.text or "").strip().lower()
     if s == "-":
         max_uses = None
     else:
@@ -335,14 +320,13 @@ async def codes_max_uses(message: types.Message, state: FSMContext):
             event_id=int(data["event_id"]),
             code=str(data["code"]),
             points=int(data["points"]),
-            is_income=bool(data["is_income"]),
+            is_income=True,
             starts_at=_iso_to_dt(data.get("starts_at")),
             expires_at=_iso_to_dt(data.get("expires_at")),
             max_uses=max_uses,
         )
-        sign = "➕" if data["is_income"] else "➖"
         await message.answer(
-            f"✅ Код создан\n🔑 {data['code']} | {sign} {data['points']} баллов",
+            f"✅ Код создан\n🔑 {data['code']} | ➕ {data['points']} баллов",
             reply_markup=organizer_menu()
         )
     except Exception:

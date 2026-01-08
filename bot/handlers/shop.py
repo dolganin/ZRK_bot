@@ -1,5 +1,6 @@
 from aiogram import Router, types
 from aiogram.filters import Command
+from aiogram.types import InputMediaPhoto
 from keyboards.student_keyboards import main_menu
 from keyboards.shop_keyboards import shop_item_kb, shop_cart_kb
 from utils.shop_db import (
@@ -14,6 +15,7 @@ from utils.shop_db import (
     get_checked_out_order_id, get_product_main_image
 )
 from utils.database import get_balance
+from utils.shop_db import get_cart_qty
 
 router = Router()
 
@@ -100,10 +102,11 @@ async def show_product(message_or_call, user_id: int, idx: int):
 
     order_id = await get_or_create_draft_order(user_id)
     qty = await get_item_qty(order_id, product["id"])
+    cart_qty = await get_cart_qty(order_id)
     balance = await get_balance(user_id)
 
     text = render_product_text(product, qty, balance, idx, len(products))
-    kb = shop_item_kb(idx=idx, product_id=product["id"])
+    kb = shop_item_kb(idx=idx, product_id=product["id"], qty=qty, cart_qty=cart_qty)
 
     img = await get_product_main_image(product["id"])
     photo_file_id = img["telegram_file_id"] if img else None
@@ -127,7 +130,7 @@ async def shop_next(call: types.CallbackQuery):
 @router.callback_query(lambda c: c.data.startswith("shop:prev:"))
 async def shop_prev(call: types.CallbackQuery):
     idx = int(call.data.split(":")[2])
-    await show_product(call, call.from_user.id, idx - 1)
+    await show_product(call, call.from_user.id, idx)
 
 @router.callback_query(lambda c: c.data.startswith("shop:add:"))
 async def shop_add(call: types.CallbackQuery):
@@ -143,11 +146,14 @@ async def shop_add(call: types.CallbackQuery):
     order_id = await get_or_create_draft_order(call.from_user.id)
     res = await add_item(order_id, product_id)
     if not res["ok"]:
-        if res["reason"] == "out_of_stock":
+        if res.get("reason") == "out_of_stock":
             await call.answer("Товар закончился", show_alert=True)
             return
         await call.answer("Товар недоступен", show_alert=True)
         return
+
+    await show_product(call, call.from_user.id, idx)
+    await call.answer()
 
 
 @router.callback_query(lambda c: c.data.startswith("shop:rm:"))
@@ -177,9 +183,12 @@ async def shop_cart(call: types.CallbackQuery):
     total = await calc_order_total(order_id)
     balance = await get_balance(call.from_user.id)
 
+    total_items = sum(int(it["qty"]) for it in items) if items else 0
+
     text = render_cart_text(items, total, balance)
-    await call.message.edit_text(text, reply_markup=shop_cart_kb())
+    await call.message.edit_text(text, reply_markup=shop_cart_kb(total_items=total_items))
     await call.answer()
+
 
 @router.callback_query(lambda c: c.data == "shop:checkout")
 async def shop_checkout(call: types.CallbackQuery):
@@ -203,9 +212,10 @@ async def shop_checkout(call: types.CallbackQuery):
 
     await call.message.edit_text(
         f"✅ Заказ оформлен!\n"
-        f"Списано: {res['total']} баллов\n"
-        f"Баланс: {res['balance']}\n\n"
-        f"Дальше: скоро добавим QR для получения мерча.",
+        f"ID заказа: {res['order_id']}\n"
+        f"Сумма: {res['total']} баллов\n\n"
+        f"Сообщи организатору ID заказа для выдачи мерча.\n"
+        f"Баллы и склад спишутся при выдаче.",
         reply_markup=None
     )
     await call.answer()

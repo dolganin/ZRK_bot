@@ -334,28 +334,12 @@ async def input_points(message: types.Message, state: FSMContext):
             raise ValueError
         await state.update_data(points=points)
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Пополнение ➕", callback_data="org:code:type:income")],
-            [InlineKeyboardButton(text="Списание ➖", callback_data="org:code:type:outcome")]
-        ])
-        await message.answer("Выберите тип операции:", reply_markup=keyboard)
-        await state.set_state(OrganizerStates.waiting_for_code_type)
+        await state.update_data(is_income=True)
+        await message.answer("Введите уникальный код (латинские буквы/цифры) или '-' чтобы сгенерировать:")
+        await state.set_state(OrganizerStates.waiting_for_code)
     except Exception:
         await message.answer("❌ Введите целое число больше 0")
 
-@router.callback_query(OrganizerStates.waiting_for_code_type, F.data.startswith("org:code:type:"))
-async def select_type(callback: types.CallbackQuery, state: FSMContext):
-    if not await ensure_admin_cb(callback):
-        await state.clear()
-        return
-
-    operation_type = callback.data.split(":")[3]
-    is_income = operation_type == "income"
-    await state.update_data(is_income=is_income)
-
-    await callback.message.answer("Введите уникальный код (латинские буквы/цифры) или '-' чтобы сгенерировать:")
-    await state.set_state(OrganizerStates.waiting_for_code)
-    await callback.answer()
 
 @router.message(OrganizerStates.waiting_for_code)
 async def input_code(message: types.Message, state: FSMContext):

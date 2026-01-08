@@ -7,14 +7,13 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from core.bot import bot
 from keyboards.organizer_keyboards import organizer_menu
 from keyboards.student_keyboards import main_menu
-from utils.database import get_balance, add_points, spend_points, get_all_students_rating, is_admin
+from utils.database import get_balance, add_points, get_all_students_rating, is_admin
 from texts.storage import send_template
 
 router = Router()
 
 class CodeStates(StatesGroup):
     waiting_for_code = State()
-    waiting_for_spend_code = State()
 
 @router.message(lambda message: message.text == "⬅️ На главную")
 async def go_home(message: types.Message, state: FSMContext):
@@ -61,51 +60,6 @@ async def process_code(message: types.Message, state: FSMContext):
         await send_template(bot, message, "get_points_fail", reply_markup=main_menu())
 
     await state.clear()
-
-@router.message(Command("spend"))
-async def cmd_spend(message: types.Message, state: FSMContext):
-    await message.answer("Введите уникальный код для обмена баллов на мерч:")
-    await state.set_state(CodeStates.waiting_for_spend_code)
-
-@router.message(lambda message: message.text == "💸 Потратить баллы")
-async def keyboard_spend(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    balance = await get_balance(user_id)
-
-    keyboard = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⬅️ На главную")]], resize_keyboard=True)
-    await send_template(
-        bot,
-        message,
-        "spend_points_prompt",
-        reply_markup=keyboard,
-        parse_mode="Markdown",
-        balance=balance,
-    )
-    await state.set_state(CodeStates.waiting_for_spend_code)
-
-@router.message(CodeStates.waiting_for_spend_code)
-async def process_spend(message: types.Message, state: FSMContext):
-    if message.text == "⬅️ На главную":
-        await go_home(message, state)
-        return
-
-    user_id = message.from_user.id
-    code = (message.text or "").strip()
-    success = await spend_points(user_id, code)
-
-    if success:
-        await send_template(
-            bot,
-            message,
-            "spend_points_success",
-            reply_markup=main_menu(),
-            balance=await get_balance(user_id),
-        )
-    else:
-        await send_template(bot, message, "spend_points_fail", reply_markup=main_menu())
-
-    await state.clear()
-
 @router.message(Command("top"))
 async def cmd_top(message: types.Message):
     students = await get_all_students_rating(user_id=message.from_user.id)

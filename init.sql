@@ -1,59 +1,65 @@
 CREATE TABLE IF NOT EXISTS students (
-    id BIGINT PRIMARY KEY,              -- Telegram ID студента
-    name TEXT NOT NULL,                 -- Имя студента
-    telegram_username TEXT,            -- Никнейм студента в Telegram (может быть NULL)
-    balance INTEGER DEFAULT 0,          -- Баланс студента
-    registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- Время регистрации
-    course TEXT,                        -- Курс студента (например, 1, 2, 3, 4, 5, магистратура, аспирантура)
-    faculty TEXT                        -- Факультет студента (например, ИИР, ФЕН, ФФ и т.д.)
+    id BIGINT PRIMARY KEY,
+    name TEXT NOT NULL,
+    telegram_username TEXT,
+    balance INTEGER DEFAULT 0,
+    registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    course TEXT,
+    faculty TEXT
 );
 
-
--- Таблица администраторов
 CREATE TABLE IF NOT EXISTS admins (
     id SERIAL PRIMARY KEY,
-    user_id BIGINT UNIQUE NOT NULL  -- Telegram ID администратора
+    user_id BIGINT UNIQUE NOT NULL
 );
 
--- Таблица мероприятий
 CREATE TABLE IF NOT EXISTS events (
     id SERIAL PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,  -- Уникальное название мероприятия
-    created_at TIMESTAMP DEFAULT NOW()  -- Время создания
+    name TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Таблица кодов
 CREATE TABLE IF NOT EXISTS codes (
     id SERIAL PRIMARY KEY,
-    event_id INTEGER REFERENCES events(id),  -- Внешний ключ на мероприятие
-    code TEXT NOT NULL UNIQUE,  -- Уникальный код
-    points INTEGER NOT NULL,    -- Количество баллов
-    is_income BOOLEAN NOT NULL, -- Тип операции (пополнение или списание)
-    created_at TIMESTAMP DEFAULT NOW()  -- Время создания
+    event_id INTEGER REFERENCES events(id),
+    code TEXT NOT NULL UNIQUE,
+    points INTEGER NOT NULL,
+    is_income BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    starts_at TIMESTAMPTZ NULL,
+    expires_at TIMESTAMPTZ NULL,
+    max_uses INTEGER NULL,
+    CONSTRAINT ck_codes_income_only CHECK (is_income = TRUE)
 );
 
--- Таблица использованных кодов (привязка кодов к пользователям)
 CREATE TABLE IF NOT EXISTS user_codes (
-    user_id BIGINT REFERENCES students(id) ON DELETE CASCADE,  -- ID пользователя
-    code_id INTEGER REFERENCES codes(id) ON DELETE CASCADE,   -- ID кода
-    used_at TIMESTAMP DEFAULT NOW(),  -- Время использования
-    PRIMARY KEY (user_id, code_id)  -- Уникальная пара "пользователь-код"
+    user_id BIGINT REFERENCES students(id) ON DELETE CASCADE,
+    code_id INTEGER REFERENCES codes(id) ON DELETE CASCADE,
+    used_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (user_id, code_id)
 );
 
 CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     price_points INTEGER NOT NULL,
+    stock INTEGER NOT NULL DEFAULT 0,
     is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
+
+CREATE INDEX IF NOT EXISTS ix_products_active ON products(is_active);
 
 CREATE TABLE IF NOT EXISTS orders (
     id SERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     status TEXT NOT NULL,
     total_points INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    fulfilled_at TIMESTAMPTZ NULL,
+    fulfilled_by BIGINT NULL REFERENCES admins(user_id)
 );
+
+CREATE INDEX IF NOT EXISTS ix_orders_user_status ON orders(user_id, status);
 
 CREATE TABLE IF NOT EXISTS order_items (
     order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
@@ -93,16 +99,39 @@ WHERE is_main = TRUE;
 CREATE INDEX IF NOT EXISTS ix_product_images_product
 ON product_images(product_id);
 
-ALTER TABLE products
-ADD COLUMN IF NOT EXISTS stock INTEGER NOT NULL DEFAULT 0;
-
-CREATE INDEX IF NOT EXISTS ix_products_active ON products(is_active);
-
-ALTER TABLE codes
-ADD COLUMN IF NOT EXISTS starts_at TIMESTAMPTZ NULL,
-ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL,
-ADD COLUMN IF NOT EXISTS max_uses INTEGER NULL;
-
 CREATE INDEX IF NOT EXISTS ix_codes_code ON codes(code);
 CREATE INDEX IF NOT EXISTS ix_codes_window ON codes(starts_at, expires_at);
 
+-- Миграции/совместимость со старой схемой (если контейнер поднимался раньше)
+ALTER TABLE products
+ADD COLUMN IF NOT EXISTS stock INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE codes
+ADD COLUMN IF NOT EXISTS starts_at TIMESTAMPTZ NULL;
+
+ALTER TABLE codes
+ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;
+
+ALTER TABLE codes
+ADD COLUMN IF NOT EXISTS max_uses INTEGER NULL;
+
+ALTER TABLE orders
+ADD COLUMN IF NOT EXISTS fulfilled_at TIMESTAMPTZ NULL;
+
+ALTER TABLE orders
+ADD COLUMN IF NOT EXISTS fulfilled_by BIGINT NULL REFERENCES admins(user_id);
+
+ALTER TABLE codes
+ADD COLUMN IF NOT EXISTS is_income BOOLEAN NOT NULL DEFAULT TRUE;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'ck_codes_income_only'
+    ) THEN
+        ALTER TABLE codes
+        ADD CONSTRAINT ck_codes_income_only CHECK (is_income = TRUE);
+    END IF;
+END $$;

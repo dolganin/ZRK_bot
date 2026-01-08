@@ -1,4 +1,5 @@
 from utils.database import get_db
+from typing import Any
 
 async def seed_products_if_empty():
     pool = await get_db()
@@ -62,23 +63,14 @@ async def add_item(order_id: int, product_id: int):
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                SELECT price_points, stock
+                SELECT price_points
                 FROM products
                 WHERE id = $1 AND is_active = TRUE
-                FOR UPDATE
                 """,
                 product_id
             )
             if not row:
                 return {"ok": False, "reason": "not_found"}
-
-            if int(row["stock"]) <= 0:
-                return {"ok": False, "reason": "out_of_stock"}
-
-            await conn.execute(
-                "UPDATE products SET stock = stock - 1 WHERE id = $1",
-                product_id
-            )
 
             await conn.execute(
                 """
@@ -103,11 +95,6 @@ async def remove_item(order_id: int, product_id: int):
             )
             if qty is None:
                 return True
-
-            await conn.execute(
-                "UPDATE products SET stock = stock + 1 WHERE id = $1",
-                product_id
-            )
 
             if qty <= 1:
                 await conn.execute(
@@ -176,15 +163,11 @@ async def checkout_order(user_id: int):
                 return {"ok": False, "reason": "not_enough", "need": total, "balance": balance}
 
             await conn.execute(
-                "UPDATE students SET balance = balance - $1 WHERE id = $2",
-                total, user_id
-            )
-            await conn.execute(
                 "UPDATE orders SET status = 'CHECKED_OUT', total_points = $1 WHERE id = $2",
                 total, order_id
             )
-            new_balance = balance - total
-            return {"ok": True, "order_id": order_id, "total": total, "balance": new_balance}
+            return {"ok": True, "order_id": order_id, "total": total, "balance": balance}
+
 
 async def create_product(name: str, price_points: int, stock: int):
     pool = await get_db()
@@ -325,3 +308,109 @@ async def get_product(product_id: int):
             int(product_id)
         )
         return dict(row) if row else None
+
+async def fulfill_order_by_admin(order_id: int, admin_id: int) -> dict[str, Any]:
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            order = await conn.fetchrow(
+                """
+                SELECT id, user_id, status, total_points, fulfilled_at
+                FROM orders
+                WHERE id = $1
+                FOR UPDATE
+                """,
+                int(order_id)
+            )
+            if not order:
+                return {"ok": False, "reason": "not_found"}
+
+            status = order["status"]
+            if status == "FULFILLED":
+                return {"ok": False, "reason": "already_fulfilled"}
+            if status != "CHECKED_OUT":
+                return {"ok": False, "reason": "bad_status", "status": status}
+
+            user_id = int(order["user_id"])
+
+            items = await conn.fetch(
+                """
+                SELECT oi.product_id, oi.qty, oi.points_each, p.name
+                FROM order_items oi
+                JOIN products p ON p.id = oi.product_id
+                WHERE oi.order_id = $1
+                ORDER BY oi.product_id ASC
+                FOR UPDATE
+                """,
+                int(order_id)
+            )
+            if not items:
+                return {"ok": False, "reason": "empty"}
+
+            total = await conn.fetchval(
+                "SELECT COALESCE(SUM(qty * points_each), 0) FROM order_items WHERE order_id = $1",
+                int(order_id)
+            )
+            total = int(total or 0)
+            if total <= 0:
+                return {"ok": False, "reason": "empty"}
+
+            balance = await conn.fetchval(
+                "SELECT balance FROM students WHERE id = $1 FOR UPDATE",
+                user_id
+            )
+            balance = int(balance or 0)
+            if balance < total:
+                return {"ok": False, "reason": "not_enough", "need": total, "balance": balance}
+
+            lacking = []
+            for it in items:
+                pid = int(it["product_id"])
+                need = int(it["qty"])
+                have = await conn.fetchval(
+                    "SELECT stock FROM products WHERE id = $1 FOR UPDATE",
+                    pid
+                )
+                have = int(have or 0)
+                if have < need:
+                    lacking.append({"product_id": pid, "name": it["name"], "need": need, "have": have})
+
+            if lacking:
+                return {"ok": False, "reason": "out_of_stock", "items": lacking}
+
+            for it in items:
+                pid = int(it["product_id"])
+                need = int(it["qty"])
+                await conn.execute(
+                    "UPDATE products SET stock = stock - $1 WHERE id = $2",
+                    need, pid
+                )
+
+            await conn.execute(
+                "UPDATE students SET balance = balance - $1 WHERE id = $2",
+                total, user_id
+            )
+
+            await conn.execute(
+                """
+                UPDATE orders
+                SET status = 'FULFILLED',
+                    fulfilled_at = NOW(),
+                    fulfilled_by = $2,
+                    total_points = $3
+                WHERE id = $1
+                """,
+                int(order_id), int(admin_id), total
+            )
+
+            new_balance = balance - total
+            return {"ok": True, "user_id": user_id, "total": total, "new_balance": new_balance}
+        
+async def get_cart_qty(order_id: int) -> int:
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        v = await conn.fetchval(
+            "SELECT COALESCE(SUM(qty), 0) FROM order_items WHERE order_id = $1",
+            int(order_id)
+        )
+        return int(v or 0)
