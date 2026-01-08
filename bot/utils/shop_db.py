@@ -135,38 +135,63 @@ async def calc_order_total(order_id: int):
         return int(total or 0)
 
 async def checkout_order(user_id: int):
-    checked_out_id = await get_checked_out_order_id(user_id)
-    if checked_out_id:
-        return {"ok": False, "reason": "already_checked_out"}
-
     pool = await get_db()
     async with pool.acquire() as conn:
         async with conn.transaction():
             order_id = await conn.fetchval(
-                "SELECT id FROM orders WHERE user_id = $1 AND status = 'DRAFT' ORDER BY id DESC LIMIT 1",
+                "SELECT id FROM orders WHERE user_id = $1 AND status = 'DRAFT' ORDER BY id DESC LIMIT 1 FOR UPDATE",
                 user_id
             )
             if not order_id:
                 return {"ok": False, "reason": "no_draft"}
 
-            total = await conn.fetchval(
-                "SELECT COALESCE(SUM(qty * points_each), 0) FROM order_items WHERE order_id = $1",
-                order_id
+            items = await conn.fetch(
+                """
+                SELECT oi.product_id, oi.qty, oi.points_each, p.name
+                FROM order_items oi
+                JOIN products p ON p.id = oi.product_id
+                WHERE oi.order_id = $1
+                ORDER BY oi.product_id ASC
+                FOR UPDATE
+                """,
+                int(order_id)
             )
-            total = int(total or 0)
+            if not items:
+                return {"ok": False, "reason": "empty"}
+
+            total = sum(int(it["qty"]) * int(it["points_each"]) for it in items)
             if total <= 0:
                 return {"ok": False, "reason": "empty"}
 
-            balance = await conn.fetchval("SELECT balance FROM students WHERE id = $1", user_id)
-            balance = int(balance or 0)
-            if balance < total:
-                return {"ok": False, "reason": "not_enough", "need": total, "balance": balance}
+            lacking = []
+            for it in items:
+                pid = int(it["product_id"])
+                need = int(it["qty"])
+                have = await conn.fetchval(
+                    "SELECT stock FROM products WHERE id = $1 AND is_active = TRUE FOR UPDATE",
+                    pid
+                )
+                have = int(have or 0)
+                if have < need:
+                    lacking.append({"product_id": pid, "name": it["name"], "need": need, "have": have})
+
+            if lacking:
+                return {"ok": False, "reason": "out_of_stock", "items": lacking}
+
+            for it in items:
+                pid = int(it["product_id"])
+                need = int(it["qty"])
+                await conn.execute(
+                    "UPDATE products SET stock = stock - $1 WHERE id = $2",
+                    need, pid
+                )
 
             await conn.execute(
-                "UPDATE orders SET status = 'CHECKED_OUT', total_points = $1 WHERE id = $2",
-                total, order_id
+                "UPDATE orders SET status = 'RESERVED', total_points = $1 WHERE id = $2",
+                int(total), int(order_id)
             )
-            return {"ok": True, "order_id": order_id, "total": total, "balance": balance}
+
+            return {"ok": True, "order_id": int(order_id), "total": int(total)}
 
 
 async def create_product(name: str, price_points: int, stock: int):
@@ -414,3 +439,179 @@ async def get_cart_qty(order_id: int) -> int:
             int(order_id)
         )
         return int(v or 0)
+
+from typing import Any
+
+async def get_order_for_issue(order_id: int) -> dict[str, Any]:
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        order = await conn.fetchrow(
+            """
+            SELECT id, user_id, status
+            FROM orders
+            WHERE id = $1
+            """,
+            int(order_id)
+        )
+        if not order:
+            return {"ok": False, "reason": "not_found"}
+
+        status = str(order["status"])
+        if status == "FULFILLED":
+            return {"ok": False, "reason": "already_fulfilled"}
+        if status not in {"RESERVED", "CHECKED_OUT"}:
+            return {"ok": False, "reason": "bad_status", "status": status}
+
+        items = await conn.fetch(
+            """
+            SELECT oi.product_id, oi.qty, oi.points_each, p.name
+            FROM order_items oi
+            JOIN products p ON p.id = oi.product_id
+            WHERE oi.order_id = $1
+            ORDER BY oi.product_id ASC
+            """,
+            int(order_id)
+        )
+        if not items:
+            return {"ok": False, "reason": "empty"}
+
+        return {
+            "ok": True,
+            "order": {"order_id": int(order["id"]), "user_id": int(order["user_id"]), "status": status},
+            "items": [dict(x) for x in items]
+        }
+
+
+async def issue_order_by_admin(order_id: int, admin_id: int, issued_qty: dict[int, int]) -> dict[str, Any]:
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            order = await conn.fetchrow(
+                """
+                SELECT id, user_id, status
+                FROM orders
+                WHERE id = $1
+                FOR UPDATE
+                """,
+                int(order_id)
+            )
+            if not order:
+                return {"ok": False, "reason": "not_found"}
+
+            status = str(order["status"])
+            if status == "FULFILLED":
+                return {"ok": False, "reason": "already_fulfilled"}
+            if status not in {"RESERVED", "CHECKED_OUT"}:
+                return {"ok": False, "reason": "bad_status", "status": status}
+
+            user_id = int(order["user_id"])
+
+            items = await conn.fetch(
+                """
+                SELECT oi.product_id, oi.qty, oi.points_each, p.name
+                FROM order_items oi
+                JOIN products p ON p.id = oi.product_id
+                WHERE oi.order_id = $1
+                ORDER BY oi.product_id ASC
+                FOR UPDATE
+                """,
+                int(order_id)
+            )
+            if not items:
+                return {"ok": False, "reason": "empty"}
+
+            normalized = {}
+            for it in items:
+                pid = int(it["product_id"])
+                q_ordered = int(it["qty"])
+                qi = int(issued_qty.get(pid, q_ordered))
+                if qi < 0:
+                    qi = 0
+                if qi > q_ordered:
+                    qi = q_ordered
+                normalized[pid] = qi
+
+            total = 0
+            for it in items:
+                pid = int(it["product_id"])
+                total += int(it["points_each"]) * int(normalized[pid])
+
+            if total <= 0:
+                if status == "RESERVED":
+                    for it in items:
+                        pid = int(it["product_id"])
+                        q_ordered = int(it["qty"])
+                        if q_ordered > 0:
+                            await conn.execute(
+                                "UPDATE products SET stock = stock + $1 WHERE id = $2",
+                                q_ordered, pid
+                            )
+                await conn.execute(
+                    """
+                    UPDATE orders
+                    SET status = 'FULFILLED',
+                        fulfilled_at = NOW(),
+                        fulfilled_by = $2,
+                        total_points = 0
+                    WHERE id = $1
+                    """,
+                    int(order_id), int(admin_id)
+                )
+                balance = await conn.fetchval("SELECT balance FROM students WHERE id = $1", user_id)
+                return {"ok": False, "reason": "nothing_to_issue", "balance": int(balance or 0)}
+
+            if status == "CHECKED_OUT":
+                lacking = []
+                for it in items:
+                    pid = int(it["product_id"])
+                    need = int(normalized[pid])
+                    if need <= 0:
+                        continue
+                    have = await conn.fetchval("SELECT stock FROM products WHERE id = $1 FOR UPDATE", pid)
+                    have = int(have or 0)
+                    if have < need:
+                        lacking.append({"product_id": pid, "name": it["name"], "need": need, "have": have})
+                if lacking:
+                    return {"ok": False, "reason": "out_of_stock", "items": lacking}
+
+                for it in items:
+                    pid = int(it["product_id"])
+                    need = int(normalized[pid])
+                    if need > 0:
+                        await conn.execute("UPDATE products SET stock = stock - $1 WHERE id = $2", need, pid)
+
+            if status == "RESERVED":
+                for it in items:
+                    pid = int(it["product_id"])
+                    q_ordered = int(it["qty"])
+                    q_issue = int(normalized[pid])
+                    diff = q_ordered - q_issue
+                    if diff > 0:
+                        await conn.execute("UPDATE products SET stock = stock + $1 WHERE id = $2", diff, pid)
+
+            balance = await conn.fetchval(
+                "SELECT balance FROM students WHERE id = $1 FOR UPDATE",
+                user_id
+            )
+            balance = int(balance or 0)
+            if balance < total:
+                return {"ok": False, "reason": "not_enough", "need": total, "balance": balance}
+
+            await conn.execute(
+                "UPDATE students SET balance = balance - $1 WHERE id = $2",
+                int(total), int(user_id)
+            )
+
+            await conn.execute(
+                """
+                UPDATE orders
+                SET status = 'FULFILLED',
+                    fulfilled_at = NOW(),
+                    fulfilled_by = $2,
+                    total_points = $3
+                WHERE id = $1
+                """,
+                int(order_id), int(admin_id), int(total)
+            )
+
+            return {"ok": True, "user_id": user_id, "total": int(total), "new_balance": balance - int(total)}

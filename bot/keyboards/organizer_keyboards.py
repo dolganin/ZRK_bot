@@ -1,5 +1,6 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
+
 def organizer_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -8,9 +9,11 @@ def organizer_menu():
             [KeyboardButton(text="📜 Активные коды"), KeyboardButton(text="👥 Добавить админа")],
             [KeyboardButton(text="🛒 Товары"), KeyboardButton(text="✏️ Тексты")],
             [KeyboardButton(text="✅ Выдать заказ")],
+            [KeyboardButton(text="📦 Отчёт по складу")],
         ],
         resize_keyboard=True,
     )
+
 
 def rating_menu():
     return ReplyKeyboardMarkup(

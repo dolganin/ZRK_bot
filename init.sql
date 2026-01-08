@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS codes (
     CONSTRAINT ck_codes_income_only CHECK (is_income = TRUE)
 );
 
+CREATE INDEX IF NOT EXISTS ix_codes_code ON codes(code);
+CREATE INDEX IF NOT EXISTS ix_codes_window ON codes(starts_at, expires_at);
+
 CREATE TABLE IF NOT EXISTS user_codes (
     user_id BIGINT REFERENCES students(id) ON DELETE CASCADE,
     code_id INTEGER REFERENCES codes(id) ON DELETE CASCADE,
@@ -65,9 +68,16 @@ CREATE TABLE IF NOT EXISTS order_items (
     order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
     product_id INTEGER NOT NULL REFERENCES products(id),
     qty INTEGER NOT NULL,
+    issued_qty INTEGER NOT NULL DEFAULT 0,
     points_each INTEGER NOT NULL,
-    PRIMARY KEY (order_id, product_id)
+    PRIMARY KEY (order_id, product_id),
+    CONSTRAINT ck_order_items_qty_nonneg CHECK (qty >= 0),
+    CONSTRAINT ck_order_items_issued_nonneg CHECK (issued_qty >= 0),
+    CONSTRAINT ck_order_items_issued_le_qty CHECK (issued_qty <= qty)
 );
+
+CREATE INDEX IF NOT EXISTS ix_order_items_order ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS ix_order_items_product ON order_items(product_id);
 
 CREATE TABLE IF NOT EXISTS claim_tokens (
     token TEXT PRIMARY KEY,
@@ -98,40 +108,3 @@ WHERE is_main = TRUE;
 
 CREATE INDEX IF NOT EXISTS ix_product_images_product
 ON product_images(product_id);
-
-CREATE INDEX IF NOT EXISTS ix_codes_code ON codes(code);
-CREATE INDEX IF NOT EXISTS ix_codes_window ON codes(starts_at, expires_at);
-
--- Миграции/совместимость со старой схемой (если контейнер поднимался раньше)
-ALTER TABLE products
-ADD COLUMN IF NOT EXISTS stock INTEGER NOT NULL DEFAULT 0;
-
-ALTER TABLE codes
-ADD COLUMN IF NOT EXISTS starts_at TIMESTAMPTZ NULL;
-
-ALTER TABLE codes
-ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;
-
-ALTER TABLE codes
-ADD COLUMN IF NOT EXISTS max_uses INTEGER NULL;
-
-ALTER TABLE orders
-ADD COLUMN IF NOT EXISTS fulfilled_at TIMESTAMPTZ NULL;
-
-ALTER TABLE orders
-ADD COLUMN IF NOT EXISTS fulfilled_by BIGINT NULL REFERENCES admins(user_id);
-
-ALTER TABLE codes
-ADD COLUMN IF NOT EXISTS is_income BOOLEAN NOT NULL DEFAULT TRUE;
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'ck_codes_income_only'
-    ) THEN
-        ALTER TABLE codes
-        ADD CONSTRAINT ck_codes_income_only CHECK (is_income = TRUE);
-    END IF;
-END $$;
