@@ -124,3 +124,9 @@ CREATE TABLE IF NOT EXISTS maps (
 );
 
 CREATE INDEX IF NOT EXISTS idx_maps_active ON maps(is_active);
+
+ALTER TABLE orders
+ADD COLUMN IF NOT EXISTS reserved_until TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS idx_orders_reserved_until
+ON orders(status, reserved_until);

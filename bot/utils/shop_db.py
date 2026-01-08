@@ -138,6 +138,20 @@ async def checkout_order(user_id: int):
     pool = await get_db()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            already = await conn.fetchval(
+                """
+                SELECT id
+                FROM orders
+                WHERE user_id = $1 AND status IN ('RESERVED', 'CHECKED_OUT')
+                ORDER BY id DESC
+                LIMIT 1
+                FOR UPDATE
+                """,
+                user_id
+            )
+            if already:
+                return {"ok": False, "reason": "already_checked_out"}
+
             order_id = await conn.fetchval(
                 "SELECT id FROM orders WHERE user_id = $1 AND status = 'DRAFT' ORDER BY id DESC LIMIT 1 FOR UPDATE",
                 user_id
@@ -163,6 +177,14 @@ async def checkout_order(user_id: int):
             if total <= 0:
                 return {"ok": False, "reason": "empty"}
 
+            balance = await conn.fetchval(
+                "SELECT balance FROM students WHERE id = $1 FOR UPDATE",
+                user_id
+            )
+            balance = int(balance or 0)
+            if balance < total:
+                return {"ok": False, "reason": "not_enough", "need": int(total), "balance": int(balance)}
+
             lacking = []
             for it in items:
                 pid = int(it["product_id"])
@@ -187,9 +209,15 @@ async def checkout_order(user_id: int):
                 )
 
             await conn.execute(
-                "UPDATE orders SET status = 'RESERVED', total_points = $1 WHERE id = $2",
-                int(total), int(order_id)
-            )
+            """
+            UPDATE orders
+            SET status = 'RESERVED',
+                total_points = $1,
+                reserved_until = NOW() + INTERVAL '1 hour'
+            WHERE id = $2
+            """,
+            int(total), int(order_id)
+)
 
             return {"ok": True, "order_id": int(order_id), "total": int(total)}
 
@@ -615,3 +643,65 @@ async def issue_order_by_admin(order_id: int, admin_id: int, issued_qty: dict[in
             )
 
             return {"ok": True, "user_id": user_id, "total": int(total), "new_balance": balance - int(total)}
+
+async def get_active_order_id(user_id: int):
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            """
+            SELECT id
+            FROM orders
+            WHERE user_id = $1 AND status IN ('RESERVED', 'CHECKED_OUT')
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            user_id
+        )
+
+
+async def expire_orders(limit: int = 50) -> int:
+    pool = await get_db()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            order_ids = await conn.fetch(
+                """
+                SELECT id
+                FROM orders
+                WHERE status IN ('RESERVED', 'CHECKED_OUT')
+                  AND reserved_until IS NOT NULL
+                  AND reserved_until < NOW()
+                ORDER BY reserved_until ASC
+                LIMIT $1
+                FOR UPDATE SKIP LOCKED
+                """,
+                int(limit)
+            )
+
+            expired = 0
+            for r in order_ids:
+                oid = int(r["id"])
+
+                items = await conn.fetch(
+                    """
+                    SELECT product_id, qty
+                    FROM order_items
+                    WHERE order_id = $1
+                    FOR UPDATE
+                    """,
+                    oid
+                )
+
+                for it in items:
+                    pid = int(it["product_id"])
+                    q = int(it["qty"])
+                    if q > 0:
+                        await conn.execute(
+                            "UPDATE products SET stock = stock + $1 WHERE id = $2",
+                            q, pid
+                        )
+
+                await conn.execute("DELETE FROM order_items WHERE order_id = $1", oid)
+                await conn.execute("DELETE FROM orders WHERE id = $1", oid)
+                expired += 1
+
+            return expired

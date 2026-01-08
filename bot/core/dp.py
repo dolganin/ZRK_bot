@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import redis.asyncio as redis
 from aiogram import Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
@@ -13,12 +14,23 @@ from texts.texts_editor import router as texts_editor_router
 from handlers.organizer_map import router as organizer_map_router
 from handlers.student_map import router as student_map_router
 
+from utils.order_expirer import expire_orders_loop
+
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 redis_client = redis.Redis(host="redis", port=6379, db=0)
 storage = RedisStorage(redis_client)
 
 dp = Dispatcher(storage=storage)
+
+
+async def _on_startup(dispatcher: Dispatcher):
+    asyncio.create_task(expire_orders_loop())
+
+
+dp.startup.register(_on_startup)
+
 
 dp.include_router(student.router)
 dp.include_router(student_map_router)

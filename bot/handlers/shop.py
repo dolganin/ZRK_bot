@@ -12,7 +12,7 @@ from utils.shop_db import (
     get_order_items,
     calc_order_total,
     checkout_order,
-    get_checked_out_order_id, get_product_main_image
+    get_checked_out_order_id, get_product_main_image, get_active_order_id
 )
 from utils.database import get_balance
 from utils.shop_db import get_cart_qty
@@ -192,9 +192,29 @@ async def shop_cart(call: types.CallbackQuery):
 
 @router.callback_query(lambda c: c.data == "shop:checkout")
 async def shop_checkout(call: types.CallbackQuery):
+    checked_out = await get_checked_out_order_id(call.from_user.id)
+    if checked_out:
+        await call.answer("У тебя уже есть оформленный заказ. Дождись выдачи.", show_alert=True)
+        return
+
+    order_id = await get_or_create_draft_order(call.from_user.id)
+    total = await calc_order_total(order_id)
+    balance = await get_balance(call.from_user.id)
+
+    if total <= 0:
+        await call.answer("Корзина пуста", show_alert=True)
+        return
+
+    if balance < total:
+        await call.answer(
+            f"Недостаточно баллов: нужно {total}, у тебя {balance}",
+            show_alert=True
+        )
+        return
+
     res = await checkout_order(call.from_user.id)
     if not res["ok"]:
-        reason = res["reason"]
+        reason = res.get("reason")
         if reason == "already_checked_out":
             await call.answer("У тебя уже есть оформленный заказ. Дождись выдачи.", show_alert=True)
             return
@@ -219,3 +239,19 @@ async def shop_checkout(call: types.CallbackQuery):
         reply_markup=None
     )
     await call.answer()
+
+
+
+
+@router.message(lambda m: m.text == "🧾 Заказы")
+async def my_orders(message: types.Message):
+    order_id = await get_active_order_id(message.from_user.id)
+    if not order_id:
+        await message.answer("🧾 У тебя пока нет активных заказов.", reply_markup=main_menu())
+        return
+    await message.answer(
+        f"🧾 Твой активный заказ: #{order_id}\n"
+        f"Дождись выдачи у организаторов.\n"
+        f"Баллы спишутся при выдаче.",
+        reply_markup=main_menu()
+    )
