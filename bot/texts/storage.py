@@ -1,6 +1,7 @@
 import asyncio
 import json
 from pathlib import Path
+from aiogram import types
 
 from texts.default_texts import DEFAULT_TEXTS
 
@@ -77,3 +78,24 @@ def render(text: str, **kwargs):
         return text.format(**kwargs)
     except Exception:
         return text
+
+async def send_template(bot, message: types.Message, key: str, reply_markup=None, parse_mode=None, disable_web_page_preview=None, **kwargs):
+    tpl = await get_template(key)
+    text = render(tpl["text"] or "", **kwargs)
+
+    if tpl.get("photo"):
+        await bot.send_photo(
+            chat_id=message.chat.id,
+            photo=tpl["photo"],
+            caption=text if text else None,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
+        return
+
+    await message.answer(
+        text,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode,
+        disable_web_page_preview=disable_web_page_preview,
+    )

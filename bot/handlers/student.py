@@ -4,10 +4,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
+from core.bot import bot
 from keyboards.organizer_keyboards import organizer_menu
 from keyboards.student_keyboards import main_menu
 from utils.database import get_balance, add_points, spend_points, get_all_students_rating, is_admin
-from texts.storage import get_template, render
+from texts.storage import send_template
 
 router = Router()
 
@@ -18,8 +19,7 @@ class CodeStates(StatesGroup):
 @router.message(lambda message: message.text == "⬅️ На главную")
 async def go_home(message: types.Message, state: FSMContext):
     await state.clear()
-    tpl = await get_template("go_home")
-    await message.answer(tpl["text"], parse_mode="Markdown", reply_markup=main_menu())
+    await send_template(bot, message, "go_home", reply_markup=main_menu(), parse_mode="Markdown")
 
 @router.message(Command("code"))
 async def cmd_code(message: types.Message, state: FSMContext):
@@ -34,9 +34,8 @@ async def cmd_code(message: types.Message, state: FSMContext):
 
 @router.message(lambda message: message.text == "💎 Получить баллы")
 async def keyboard_get_code(message: types.Message, state: FSMContext):
-    tpl = await get_template("get_points_prompt")
     keyboard = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⬅️ На главную")]], resize_keyboard=True)
-    await message.answer(tpl["text"], parse_mode="Markdown", reply_markup=keyboard)
+    await send_template(bot, message, "get_points_prompt", reply_markup=keyboard, parse_mode="Markdown")
     await state.set_state(CodeStates.waiting_for_code)
 
 @router.message(CodeStates.waiting_for_code)
@@ -46,15 +45,21 @@ async def process_code(message: types.Message, state: FSMContext):
         return
 
     user_id = message.from_user.id
-    code = message.text.strip()
+    code = (message.text or "").strip()
     points = await add_points(user_id, code)
+
     if points:
-        tpl = await get_template("get_points_success")
-        text = render(tpl["text"], points=points, balance=await get_balance(user_id))
-        await message.answer(text, reply_markup=main_menu())
+        await send_template(
+            bot,
+            message,
+            "get_points_success",
+            reply_markup=main_menu(),
+            points=points,
+            balance=await get_balance(user_id),
+        )
     else:
-        tpl = await get_template("get_points_fail")
-        await message.answer(tpl["text"], reply_markup=main_menu())
+        await send_template(bot, message, "get_points_fail", reply_markup=main_menu())
+
     await state.clear()
 
 @router.message(Command("spend"))
@@ -66,11 +71,16 @@ async def cmd_spend(message: types.Message, state: FSMContext):
 async def keyboard_spend(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     balance = await get_balance(user_id)
-    tpl = await get_template("spend_points_prompt")
-    text = render(tpl["text"], balance=balance)
 
     keyboard = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⬅️ На главную")]], resize_keyboard=True)
-    await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
+    await send_template(
+        bot,
+        message,
+        "spend_points_prompt",
+        reply_markup=keyboard,
+        parse_mode="Markdown",
+        balance=balance,
+    )
     await state.set_state(CodeStates.waiting_for_spend_code)
 
 @router.message(CodeStates.waiting_for_spend_code)
@@ -80,22 +90,30 @@ async def process_spend(message: types.Message, state: FSMContext):
         return
 
     user_id = message.from_user.id
-    code = message.text.strip()
+    code = (message.text or "").strip()
     success = await spend_points(user_id, code)
+
     if success:
-        tpl = await get_template("spend_points_success")
-        text = render(tpl["text"], balance=await get_balance(user_id))
-        await message.answer(text, reply_markup=main_menu())
+        await send_template(
+            bot,
+            message,
+            "spend_points_success",
+            reply_markup=main_menu(),
+            balance=await get_balance(user_id),
+        )
     else:
-        tpl = await get_template("spend_points_fail")
-        await message.answer(tpl["text"], reply_markup=main_menu())
+        await send_template(bot, message, "spend_points_fail", reply_markup=main_menu())
+
     await state.clear()
 
 @router.message(Command("top"))
 async def cmd_top(message: types.Message):
     students = await get_all_students_rating(user_id=message.from_user.id)
-    header_tpl = await get_template("top_header")
-    response = [header_tpl["text"]]
+    response = [
+        "🔥 Топ студентов\n"
+        "Посещай мероприятия Дней карьеры и выполняй задания от работодателей, чтобы получить больше баллов.\n"
+        "Лидеры рейтинга получат особые призы от Центра развития карьеры:\n\n"
+    ]
     for idx, student in enumerate(students, 1):
         response.append(f"{idx}. {student['name']} - {student['balance']} баллов")
 
@@ -105,8 +123,11 @@ async def cmd_top(message: types.Message):
 @router.message(lambda message: message.text == "🏆 Рейтинг")
 async def keyboard_top(message: types.Message):
     students = await get_all_students_rating(user_id=message.from_user.id)
-    header_tpl = await get_template("top_header")
-    response = [header_tpl["text"]]
+    response = [
+        "🔥 Топ студентов\n"
+        "Посещай мероприятия Дней карьеры и выполняй задания от работодателей, чтобы получить больше баллов.\n"
+        "Лидеры рейтинга получат особые призы от Центра развития карьеры:\n\n"
+    ]
     for idx, student in enumerate(students, 1):
         response.append(f"{idx}. {student['name']} - {student['balance']} баллов")
 
@@ -115,22 +136,28 @@ async def keyboard_top(message: types.Message):
 
 @router.message(lambda message: message.text == "📅 Программа")
 async def keyboard_program(message: types.Message):
-    tpl = await get_template("program_text")
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="Открыть программу", url="https://t.me/careerdaynsu2025")]]
     )
-    await message.answer(tpl["text"], reply_markup=keyboard)
+    await send_template(bot, message, "program_text", reply_markup=keyboard)
 
 @router.message(lambda message: message.text == "🗺 Карта")
 async def keyboard_map(message: types.Message):
-    tpl = await get_template("map_text")
-    await message.answer(tpl["text"], reply_markup=main_menu())
+    await send_template(bot, message, "map_text", reply_markup=main_menu())
 
 @router.message(Command("help"))
 async def cmd_help(message: types.Message):
     user_id = message.from_user.id
     is_user_admin = await is_admin(user_id)
 
-    tpl = await get_template("help_admin" if is_user_admin else "help_user")
+    key = "help_admin" if is_user_admin else "help_user"
     keyboard = organizer_menu() if is_user_admin else main_menu()
-    await message.answer(tpl["text"], reply_markup=keyboard, parse_mode="Markdown", disable_web_page_preview=True)
+
+    await send_template(
+        bot,
+        message,
+        key,
+        reply_markup=keyboard,
+        parse_mode="Markdown",
+        disable_web_page_preview=True,
+    )
