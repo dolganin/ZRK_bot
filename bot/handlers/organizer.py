@@ -314,30 +314,14 @@ async def select_event(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(event_id=event_id)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Добавить код", callback_data="org:code:add")],
-        [InlineKeyboardButton(text="🗑 Удалить код", callback_data="org:code:delete")],
-        [InlineKeyboardButton(text="🎲 Сгенерировать код", callback_data="org:code:gen")]
+        [InlineKeyboardButton(text="➕ Создать код", callback_data="codes:add")],
+        [InlineKeyboardButton(text="🗑 Удалить код", callback_data="codes:delete")],
+        [InlineKeyboardButton(text="📜 Показать коды", callback_data="codes:list")],
     ])
 
     await callback.message.answer("Коды мероприятия:", reply_markup=keyboard)
     await callback.answer()
 
-@router.callback_query(F.data == "org:code:gen")
-async def gen_code(callback: types.CallbackQuery):
-    if not await ensure_admin_cb(callback):
-        return
-    code = await generate_unique_code()
-    await callback.message.answer(f"🔐 Новый код:\n<code>{code}</code>", parse_mode="HTML")
-    await callback.answer()
-
-@router.callback_query(F.data == "org:code:add")
-async def start_add_code(callback: types.CallbackQuery, state: FSMContext):
-    if not await ensure_admin_cb(callback):
-        await state.clear()
-        return
-    await callback.message.answer("Введите количество баллов (целое > 0):")
-    await state.set_state(OrganizerStates.waiting_for_code_points)
-    await callback.answer()
 
 @router.message(OrganizerStates.waiting_for_code_points)
 async def input_points(message: types.Message, state: FSMContext):
@@ -405,33 +389,6 @@ async def input_code(message: types.Message, state: FSMContext):
     except Exception:
         await message.answer("❌ Не удалось создать код (возможно, уже существует)", reply_markup=organizer_menu())
     await state.clear()
-
-@router.callback_query(F.data == "org:code:delete")
-async def start_delete_code(callback: types.CallbackQuery, state: FSMContext):
-    if not await ensure_admin_cb(callback):
-        await state.clear()
-        return
-
-    data = await state.get_data()
-    event_id = data.get("event_id")
-    codes = await get_codes_usage(event_id=event_id)
-    if not codes:
-        await callback.message.answer("❌ Нет кодов для удаления", reply_markup=organizer_menu())
-        await callback.answer()
-        return
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text=f"{c['code']} ({c['points']} | {'➕' if c['is_income'] else '➖'} | использовано {c['usage_count']})",
-                callback_data=f"org:code:del:{c['code']}"
-            )
-        ]
-        for c in codes
-    ])
-    await callback.message.answer("Выберите код для удаления:", reply_markup=keyboard)
-    await state.set_state(OrganizerStates.waiting_for_code_to_delete)
-    await callback.answer()
 
 @router.callback_query(OrganizerStates.waiting_for_code_to_delete, F.data.startswith("org:code:del:"))
 async def select_code_to_delete(callback: types.CallbackQuery, state: FSMContext):

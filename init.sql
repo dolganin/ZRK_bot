@@ -97,3 +97,12 @@ ALTER TABLE products
 ADD COLUMN IF NOT EXISTS stock INTEGER NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS ix_products_active ON products(is_active);
+
+ALTER TABLE codes
+ADD COLUMN IF NOT EXISTS starts_at TIMESTAMPTZ NULL,
+ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL,
+ADD COLUMN IF NOT EXISTS max_uses INTEGER NULL;
+
+CREATE INDEX IF NOT EXISTS ix_codes_code ON codes(code);
+CREATE INDEX IF NOT EXISTS ix_codes_window ON codes(starts_at, expires_at);
+
