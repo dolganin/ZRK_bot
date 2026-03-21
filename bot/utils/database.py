@@ -1,9 +1,7 @@
 import asyncpg
 from asyncpg.pool import Pool
-from sqlalchemy.ext.asyncio import create_async_engine
 from typing import Optional, List, Dict, Union
-from utils.config import DATABASE_URL, INIT_DB_URL
-from database.models import Base
+from utils.config import DATABASE_URL
 import logging
 
 
@@ -98,46 +96,16 @@ async def redeem_code(user_id: int, code: str) -> Optional[int]:
     return delta
 
 
-async def setup_database():
-    """Инициализация базы данных и пользователя"""
-    try:
-        # Временное подключение для настройки БД через INIT_DB_URL
-        temp_conn = await asyncpg.connect(INIT_DB_URL)
-        
-        # Создание пользователя career_admin, если его нет
-        await temp_conn.execute("""
-            DO $$ 
-            BEGIN 
-                IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'career_admin') THEN
-                    CREATE ROLE career_admin WITH LOGIN PASSWORD 'securepassword' SUPERUSER;
-                END IF;
-            END $$;
-        """)
-        
-        # Создание базы данных career_quest_db, если её нет
-        await temp_conn.execute("""
-            SELECT 'CREATE DATABASE career_quest_db OWNER career_admin'
-            WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'career_quest_db')
-        """)
-        
-        await temp_conn.close()
-        logger.info("Database and user setup completed successfully")
-    except Exception as e:
-        logger.error(f"Database setup error: {e}")
-        raise
-
 async def init_db():
-    """Инициализация пула подключений и создание таблиц"""
+    """Инициализация пула подключений без изменения существующей БД."""
     global _pool
     
     try:
-        # Настройка основной БД
-        await setup_database()
-        
-        # Для создания пула нужно использовать DSN с корректной схемой:
+        if not DATABASE_URL:
+            raise RuntimeError("DATABASE_URL is not configured")
+
         dsn_for_pool = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
-        
-        # Инициализация пула подключений
+
         _pool = await asyncpg.create_pool(
             dsn_for_pool,
             min_size=2,
@@ -150,18 +118,7 @@ async def init_db():
         global _redis, _codes_cache
         _redis = Redis.from_url(REDIS_URL, decode_responses=False)
         _codes_cache = CodesCache(_redis)
-
-        
-        # Создание таблиц через SQLAlchemy (используем оригинальный DATABASE_URL)
-        engine = create_async_engine(DATABASE_URL, echo=False)
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        
-        from utils.shop_db import seed_products_if_empty
-        await seed_products_if_empty()
-
-        
-        logger.info("Tables created successfully")
+        logger.info("Database startup checks completed without schema changes")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
         raise

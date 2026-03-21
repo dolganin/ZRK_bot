@@ -15,11 +15,12 @@ from handlers.organizer_map import router as organizer_map_router
 from handlers.student_map import router as student_map_router
 
 from utils.order_expirer import expire_orders_loop
+from utils.config import REDIS_URL
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-redis_client = redis.Redis(host="redis", port=6379, db=0)
+redis_client = redis.from_url(REDIS_URL)
 storage = RedisStorage(redis_client)
 
 dp = Dispatcher(storage=storage)
