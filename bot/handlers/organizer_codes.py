@@ -68,6 +68,21 @@ def _dt_to_utc(dt: datetime | None) -> datetime | None:
     return dt.astimezone(UTC)
 
 
+def _dt_to_utc_iso(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    return dt.astimezone(UTC).isoformat()
+
+
+def _iso_to_dt(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
 def _parse_delta(text: str) -> timedelta:
     s = text.strip().lower()
     if s.isdigit():
@@ -231,7 +246,7 @@ async def codes_starts_delay(message: types.Message, state: FSMContext):
             await message.answer("❌ Формат: 10m / 2h / 1d / 0 / -")
             return
 
-    await state.update_data(starts_at=_dt_to_utc(starts_at))
+    await state.update_data(starts_at=_dt_to_utc_iso(starts_at))
 
     await message.answer(
         "Сколько код БУДЕТ действовать?\n"
@@ -247,7 +262,7 @@ async def codes_duration(message: types.Message, state: FSMContext):
         return
 
     data = await state.get_data()
-    starts_at = data.get("starts_at")
+    starts_at_dt = _iso_to_dt(data.get("starts_at"))
 
     s = message.text.strip().lower()
     if s == "-":
@@ -259,10 +274,10 @@ async def codes_duration(message: types.Message, state: FSMContext):
             await message.answer("❌ Формат: 30m / 12h / 7d / -")
             return
 
-        base = starts_at or datetime.now(tz=TZ)
+        base = starts_at_dt or datetime.now(tz=UTC)
         expires_at = base + duration
 
-    await state.update_data(expires_at=_dt_to_utc(expires_at))
+    await state.update_data(expires_at=_dt_to_utc_iso(expires_at))
 
     await message.answer(
         "Лимит использований?\n"
@@ -295,8 +310,8 @@ async def codes_max_uses(message: types.Message, state: FSMContext):
         code=data["code"],
         points=data["points"],
         is_income=True,
-        starts_at=data["starts_at"],
-        expires_at=data["expires_at"],
+        starts_at=_iso_to_dt(data.get("starts_at")),
+        expires_at=_iso_to_dt(data.get("expires_at")),
         max_uses=max_uses,
     )
 
