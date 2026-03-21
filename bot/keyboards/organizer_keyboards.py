@@ -1,7 +1,8 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+ADMIN_PANEL_TEXT = "🛠 Панель организатора"
+ADMIN_BACK_TEXT = "⬅️ В панель организатора"
 
 
 def organizer_menu():
@@ -19,13 +20,20 @@ def organizer_menu():
     )
 
 
+def admin_back_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=ADMIN_BACK_TEXT)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
 
 def rating_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="10 студентов"), KeyboardButton(text="50 студентов")],
             [KeyboardButton(text="Весь список")],
-            [KeyboardButton(text="⬅️ Назад")],
+            [KeyboardButton(text=ADMIN_BACK_TEXT)],
         ],
         resize_keyboard=True,
         one_time_keyboard=True,

@@ -5,20 +5,42 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 from core.bot import bot
-from keyboards.organizer_keyboards import organizer_menu
+from keyboards.organizer_keyboards import organizer_menu, ADMIN_BACK_TEXT
 from keyboards.student_keyboards import main_menu
 from utils.database import get_balance, add_points, get_all_students_rating, is_admin
 from texts.storage import send_template
 
 router = Router()
+HOME_TEXT = "⬅️ На главную"
 
 class CodeStates(StatesGroup):
     waiting_for_code = State()
 
-@router.message(lambda message: message.text == "⬅️ На главную")
+async def role_home_button(user_id: int) -> str:
+    return ADMIN_BACK_TEXT if await is_admin(user_id) else HOME_TEXT
+
+
+async def role_home_keyboard(user_id: int) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=await role_home_button(user_id))]],
+        resize_keyboard=True,
+    )
+
+
+async def role_main_menu(user_id: int):
+    return organizer_menu() if await is_admin(user_id) else main_menu()
+
+
+@router.message(lambda message: message.text in {HOME_TEXT, ADMIN_BACK_TEXT})
 async def go_home(message: types.Message, state: FSMContext):
     await state.clear()
-    await send_template(bot, message, "go_home", reply_markup=main_menu(), parse_mode="Markdown")
+    await send_template(
+        bot,
+        message,
+        "go_home",
+        reply_markup=await role_main_menu(message.from_user.id),
+        parse_mode="Markdown",
+    )
 
 @router.message(Command("code"))
 async def cmd_code(message: types.Message, state: FSMContext):
@@ -28,18 +50,26 @@ async def cmd_code(message: types.Message, state: FSMContext):
             reply_markup=main_menu(),
         )
         return
-    await message.answer("Введите уникальный код для получения баллов:")
+    await message.answer(
+        "Введите уникальный код для получения баллов:",
+        reply_markup=await role_home_keyboard(message.from_user.id),
+    )
     await state.set_state(CodeStates.waiting_for_code)
 
 @router.message(lambda message: message.text == "💎 Получить баллы")
 async def keyboard_get_code(message: types.Message, state: FSMContext):
-    keyboard = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⬅️ На главную")]], resize_keyboard=True)
-    await send_template(bot, message, "get_points_prompt", reply_markup=keyboard, parse_mode="Markdown")
+    await send_template(
+        bot,
+        message,
+        "get_points_prompt",
+        reply_markup=await role_home_keyboard(message.from_user.id),
+        parse_mode="Markdown",
+    )
     await state.set_state(CodeStates.waiting_for_code)
 
 @router.message(CodeStates.waiting_for_code)
 async def process_code(message: types.Message, state: FSMContext):
-    if message.text == "⬅️ На главную":
+    if message.text in {HOME_TEXT, ADMIN_BACK_TEXT}:
         await go_home(message, state)
         return
 
@@ -52,17 +82,18 @@ async def process_code(message: types.Message, state: FSMContext):
             bot,
             message,
             "get_points_success",
-            reply_markup=main_menu(),
+            reply_markup=await role_main_menu(user_id),
             points=points,
             balance=await get_balance(user_id),
         )
     else:
-        await send_template(bot, message, "get_points_fail", reply_markup=main_menu())
+        await send_template(bot, message, "get_points_fail", reply_markup=await role_main_menu(user_id))
 
     await state.clear()
+
 @router.message(Command("top"))
 async def cmd_top(message: types.Message):
-    students = await get_all_students_rating(user_id=message.from_user.id)
+    students = await get_all_students_rating(limit=10)
     response = [
         "🔥 Топ студентов\n"
         "Посещай мероприятия Дней карьеры и выполняй задания от работодателей, чтобы получить больше баллов.\n"
@@ -71,12 +102,11 @@ async def cmd_top(message: types.Message):
     for idx, student in enumerate(students, 1):
         response.append(f"{idx}. {student['name']} - {student['balance']} баллов")
 
-    keyboard = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⬅️ На главную")]], resize_keyboard=True)
-    await message.answer("\n".join(response), reply_markup=keyboard)
+    await message.answer("\n".join(response), reply_markup=await role_home_keyboard(message.from_user.id))
 
 @router.message(lambda message: message.text == "🏆 Рейтинг")
 async def keyboard_top(message: types.Message):
-    students = await get_all_students_rating(user_id=message.from_user.id)
+    students = await get_all_students_rating(limit=10)
     response = [
         "🔥 Топ студентов\n"
         "Посещай мероприятия Дней карьеры и выполняй задания от работодателей, чтобы получить больше баллов.\n"
@@ -85,8 +115,7 @@ async def keyboard_top(message: types.Message):
     for idx, student in enumerate(students, 1):
         response.append(f"{idx}. {student['name']} - {student['balance']} баллов")
 
-    keyboard = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⬅️ На главную")]], resize_keyboard=True)
-    await message.answer("\n".join(response), reply_markup=keyboard)
+    await message.answer("\n".join(response), reply_markup=await role_home_keyboard(message.from_user.id))
 
 @router.message(lambda message: message.text == "📅 Программа")
 async def keyboard_program(message: types.Message):

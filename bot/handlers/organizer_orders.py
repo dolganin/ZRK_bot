@@ -5,7 +5,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from keyboards.student_keyboards import main_menu
-from keyboards.organizer_keyboards import organizer_menu
+from keyboards.organizer_keyboards import organizer_menu, admin_back_keyboard, ADMIN_BACK_TEXT, ADMIN_PANEL_TEXT
 from utils.database import is_admin
 from utils.shop_db import get_order_for_issue, issue_order_by_admin
 
@@ -88,7 +88,10 @@ def _issue_kb(items: list[dict], issued: dict) -> InlineKeyboardMarkup:
 async def cmd_fulfill(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
         return
-    await message.answer("Введите ID заказа, который нужно выдать (этап подтверждения выдачи):")
+    await message.answer(
+        "Введите ID заказа, который нужно выдать (этап подтверждения выдачи):",
+        reply_markup=admin_back_keyboard(),
+    )
     await state.set_state(OrganizerOrdersStates.waiting_for_order_id)
 
 
@@ -96,7 +99,10 @@ async def cmd_fulfill(message: types.Message, state: FSMContext):
 async def fulfill_btn(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
         return
-    await message.answer("Введите ID заказа, который нужно выдать (этап подтверждения выдачи):")
+    await message.answer(
+        "Введите ID заказа, который нужно выдать (этап подтверждения выдачи):",
+        reply_markup=admin_back_keyboard(),
+    )
     await state.set_state(OrganizerOrdersStates.waiting_for_order_id)
 
 
@@ -107,8 +113,8 @@ async def issue_start_by_id(message: types.Message, state: FSMContext):
         return
 
     raw = (message.text or "").strip()
-    if raw.lower() in {"назад", "⬅️ назад"}:
-        await message.answer("🛠 Панель организатора", reply_markup=organizer_menu())
+    if raw == ADMIN_BACK_TEXT or raw.lower() in {"назад", "⬅️ назад"}:
+        await message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
         await state.clear()
         return
 
@@ -162,7 +168,7 @@ async def issue_cancel(call: types.CallbackQuery, state: FSMContext):
     if not await ensure_admin_cb(call):
         await state.clear()
         return
-    await call.message.answer("🛠 Панель организатора", reply_markup=organizer_menu())
+    await call.message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
     await state.clear()
     await call.answer()
 

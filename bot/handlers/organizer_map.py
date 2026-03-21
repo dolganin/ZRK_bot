@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from keyboards.organizer_keyboards import organizer_menu
+from keyboards.organizer_keyboards import organizer_menu, admin_back_keyboard, ADMIN_BACK_TEXT, ADMIN_PANEL_TEXT
 from keyboards.student_keyboards import main_menu
 from utils.database import is_admin
 from utils.map_db import create_map, list_maps, get_map, set_map_image, set_map_active, delete_map
@@ -66,7 +66,7 @@ async def mapadm_back(call: types.CallbackQuery, state: FSMContext):
     if not await ensure_admin_cb(call):
         return
     await state.clear()
-    await call.message.answer("🛠 Панель организатора", reply_markup=organizer_menu())
+    await call.message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
     await call.answer()
 
 
@@ -85,7 +85,10 @@ async def mapadm_add(call: types.CallbackQuery, state: FSMContext):
     if not await ensure_admin_cb(call):
         return
     await state.clear()
-    await call.message.answer("Введите название карты (например: 1 ЭТАЖ):", reply_markup=organizer_menu())
+    await call.message.answer(
+        "Введите название карты (например: 1 ЭТАЖ):",
+        reply_markup=admin_back_keyboard(),
+    )
     await state.set_state(MapAdminStates.waiting_title)
     await call.answer()
 
@@ -95,19 +98,27 @@ async def mapadm_title(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
         await state.clear()
         return
+    if message.text == ADMIN_BACK_TEXT:
+        await message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
+        await state.clear()
+        return
     title = (message.text or "").strip()
     if not title:
         await message.answer("Название не должно быть пустым. Введите снова:")
         return
     map_id = await create_map(title=title)
     await state.update_data(map_id=map_id)
-    await message.answer("Теперь отправьте фото карты (не файлом, а фото).")
+    await message.answer("Теперь отправьте фото карты (не файлом, а фото).", reply_markup=admin_back_keyboard())
     await state.set_state(MapAdminStates.waiting_photo)
 
 
 @router.message(MapAdminStates.waiting_photo)
 async def mapadm_photo(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
+        await state.clear()
+        return
+    if message.text == ADMIN_BACK_TEXT:
+        await message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
         await state.clear()
         return
     if not message.photo:

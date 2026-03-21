@@ -224,25 +224,23 @@ async def send_notification(text: str):
             except Exception as e:
                 logger.error(f"Failed to send message to {student['id']}: {e}")
 
-async def get_all_students_rating(user_id: int, limit: int = 10) -> List[Dict]:
-    """Полный рейтинг студентов с возможностью указать количество первых мест"""
+async def get_all_students_rating(limit: int | None = 10) -> List[Dict]:
+    """Рейтинг студентов. Если limit=None, возвращает весь список."""
     pool = await get_db()
     async with pool.acquire() as conn:
-        if await is_admin(user_id):
-            # If the user is an admin, return all students
+        if limit is None:
             records = await conn.fetch(
                 """SELECT name, balance
                 FROM students
                 ORDER BY balance DESC"""
             )
         else:
-            # If the user is not an admin, return the top 10 students
             records = await conn.fetch(
                 """SELECT name, balance
                 FROM students
                 ORDER BY balance DESC
                 LIMIT $1""",
-                limit
+                int(limit)
             )
         return [dict(r) for r in records]
 

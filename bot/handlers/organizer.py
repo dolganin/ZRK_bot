@@ -10,7 +10,13 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
-from keyboards.organizer_keyboards import organizer_menu, rating_menu
+from keyboards.organizer_keyboards import (
+    organizer_menu,
+    rating_menu,
+    admin_back_keyboard,
+    ADMIN_BACK_TEXT,
+    ADMIN_PANEL_TEXT,
+)
 from keyboards.student_keyboards import main_menu
 from utils.database import (
     is_admin,
@@ -80,7 +86,7 @@ async def ensure_admin_cb(call: types.CallbackQuery):
 async def admin_home(message: types.Message):
     if not await ensure_admin(message):
         return
-    await message.answer("🛠 Панель организатора", reply_markup=organizer_menu())
+    await message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
 
 @router.message(F.text == "📊 Рейтинг")
 async def show_rating(message: types.Message, state: FSMContext):
@@ -95,8 +101,8 @@ async def handle_rating_limit(message: types.Message, state: FSMContext):
         await state.clear()
         return
 
-    if message.text == "⬅️ Назад":
-        await message.answer("🛠 Панель организатора", reply_markup=organizer_menu())
+    if message.text == ADMIN_BACK_TEXT:
+        await message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
         await state.clear()
         return
 
@@ -110,7 +116,7 @@ async def handle_rating_limit(message: types.Message, state: FSMContext):
         await message.answer("❌ Неправильный выбор!", reply_markup=rating_menu())
         return
 
-    rating = await get_all_students_rating(user_id=message.from_user.id, limit=limit or 10_000_000)
+    rating = await get_all_students_rating(limit=limit)
 
     title = f"🔥 Рейтинг (топ {limit})" if limit else "🔥 Полный рейтинг"
     lines = [title, ""]
@@ -124,12 +130,16 @@ async def handle_rating_limit(message: types.Message, state: FSMContext):
 async def start_notify(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
         return
-    await message.answer("✍️ Введите текст уведомления:")
+    await message.answer("✍️ Введите текст уведомления:", reply_markup=admin_back_keyboard())
     await state.set_state(OrganizerStates.waiting_for_notification)
 
 @router.message(OrganizerStates.waiting_for_notification)
 async def confirm_notify(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
+        await state.clear()
+        return
+    if message.text == ADMIN_BACK_TEXT:
+        await message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
         await state.clear()
         return
 
@@ -175,12 +185,16 @@ async def process_cancel_send_notification(callback: types.CallbackQuery, state:
 async def start_add_admin(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
         return
-    await message.answer("🆔 Введите Telegram ID пользователя:")
+    await message.answer("🆔 Введите Telegram ID пользователя:", reply_markup=admin_back_keyboard())
     await state.set_state(OrganizerStates.waiting_for_admin_id)
 
 @router.message(OrganizerStates.waiting_for_admin_id)
 async def process_add_admin(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
+        await state.clear()
+        return
+    if message.text == ADMIN_BACK_TEXT:
+        await message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
         await state.clear()
         return
     try:
@@ -240,13 +254,17 @@ async def manage_events(message: types.Message):
 async def event_add(callback: types.CallbackQuery, state: FSMContext):
     if not await ensure_admin_cb(callback):
         return
-    await callback.message.answer("📝 Введите название мероприятия:")
+    await callback.message.answer("📝 Введите название мероприятия:", reply_markup=admin_back_keyboard())
     await state.set_state(OrganizerStates.waiting_for_event_name)
     await callback.answer()
 
 @router.message(OrganizerStates.waiting_for_event_name)
 async def process_event_name(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
+        await state.clear()
+        return
+    if message.text == ADMIN_BACK_TEXT:
+        await message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
         await state.clear()
         return
     await add_event(message.text)
