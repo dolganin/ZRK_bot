@@ -1,4 +1,7 @@
 from aiogram import Bot
-from utils.config import TOKEN  # Убедитесь, что в utils/config.py есть переменная TOKEN
+from aiogram.client.session.aiohttp import AiohttpSession
 
-bot = Bot(token=TOKEN)
+from utils.config import TOKEN, TELEGRAM_PROXY_URL
+
+session = AiohttpSession(proxy=TELEGRAM_PROXY_URL) if TELEGRAM_PROXY_URL else None
+bot = Bot(token=TOKEN, session=session)
