@@ -35,6 +35,8 @@ def render_cart_text(items, total: int, balance: int):
     lines = ["🧾 Корзина\n"]
     for it in items:
         lines.append(f"• {it['name']} × {it['qty']} = {it['subtotal']} баллов")
+    lines.append("")
+    lines.append("Нажми на товар ниже, чтобы убрать 1 шт. из корзины.")
     lines.append(f"\nИтого: {total} баллов")
     lines.append(f"💳 Твой баланс: {balance}")
     return "\n".join(lines)
@@ -191,7 +193,32 @@ async def shop_cart(call: types.CallbackQuery):
     total_items = sum(int(it["qty"]) for it in items) if items else 0
 
     text = render_cart_text(items, total, balance)
-    await upsert_product_message(call, text, shop_cart_kb(total_items=total_items), None)
+    await upsert_product_message(call, text, shop_cart_kb(items=items, total_items=total_items), None)
+
+
+@router.callback_query(lambda c: c.data.startswith("shop:cart:rm:"))
+async def shop_cart_rm(call: types.CallbackQuery):
+    product_id = int(call.data.split(":")[-1])
+
+    checked_out = await get_checked_out_order_id(call.from_user.id)
+    if checked_out:
+        await call.answer("У тебя уже есть оформленный заказ. Дождись выдачи.", show_alert=True)
+        return
+
+    order_id = await get_or_create_draft_order(call.from_user.id)
+    await remove_item(order_id, product_id)
+
+    items = await get_order_items(order_id)
+    total = await calc_order_total(order_id)
+    balance = await get_balance(call.from_user.id)
+    total_items = sum(int(it["qty"]) for it in items) if items else 0
+
+    await upsert_product_message(
+        call,
+        render_cart_text(items, total, balance),
+        shop_cart_kb(items=items, total_items=total_items),
+        None,
+    )
 
 
 @router.callback_query(lambda c: c.data == "shop:checkout")

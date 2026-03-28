@@ -28,11 +28,24 @@ def shop_item_kb(
     )
 
 
-def shop_cart_kb(total_items: int = 0):
+def shop_cart_kb(items: list[dict] | None = None, total_items: int = 0):
     total_items = int(total_items or 0)
+    items = items or []
+    rows = []
+
+    for item in items:
+        rows.append([
+            InlineKeyboardButton(
+                text=f"➖ {item['name']} ({item['qty']})",
+                callback_data=f"shop:cart:rm:{item['product_id']}",
+            )
+        ])
+
+    rows.extend([
+        [InlineKeyboardButton(text=f"✅ Оформить ({total_items})", callback_data="shop:checkout")],
+        [InlineKeyboardButton(text="⬅️ Назад в магазин", callback_data="shop:open:0")],
+    ])
+
     return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=f"✅ Оформить ({total_items})", callback_data="shop:checkout")],
-            [InlineKeyboardButton(text="⬅️ Назад в магазин", callback_data="shop:open:0")],
-        ]
+        inline_keyboard=rows
     )
