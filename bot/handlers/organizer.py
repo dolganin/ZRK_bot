@@ -3,6 +3,7 @@ import os
 
 from aiogram import Router, types, F
 from aiogram.filters import Command
+from aiogram.filters.state import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -61,6 +62,28 @@ async def ensure_admin_cb(call: types.CallbackQuery):
         await call.answer("Нет доступа", show_alert=True)
         return False
     return True
+
+
+def _split_message_chunks(parts: list[str], limit: int = 3500) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+
+    for part in parts:
+        if not current:
+            current = part
+            continue
+
+        if len(current) + len(part) <= limit:
+            current += part
+            continue
+
+        chunks.append(current)
+        current = part
+
+    if current:
+        chunks.append(current)
+
+    return chunks
 
 @router.message(Command("admin"))
 async def admin_home(message: types.Message):
@@ -197,11 +220,12 @@ async def products_menu(message: types.Message, state: FSMContext):
     await message.answer("Управление товарами:", reply_markup=kb)
 
 
-@router.message(F.text == "📜 Активные коды")
-async def show_active_codes(message: types.Message):
+@router.message(StateFilter("*"), F.text == "📜 Активные коды")
+async def show_active_codes(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
         return
 
+    await state.clear()
     codes = [code for code in await get_codes_usage() if code.get("status") == "active"]
     if not codes:
         await message.answer("❌ Нет активных кодов", reply_markup=organizer_menu())
@@ -217,7 +241,10 @@ async def show_active_codes(message: types.Message):
             f"📊 использований: {c['usage_count']}"
         )
 
-    await message.answer("\n".join(parts), reply_markup=organizer_menu())
+    chunks = _split_message_chunks(parts)
+    for idx, chunk in enumerate(chunks):
+        reply_markup = organizer_menu() if idx == len(chunks) - 1 else None
+        await message.answer(chunk, reply_markup=reply_markup)
 
 @router.message(F.text == "🎯 Мероприятия")
 async def manage_events(message: types.Message):

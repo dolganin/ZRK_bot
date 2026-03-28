@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Router, types, F
 from aiogram.filters import Command
+from aiogram.filters.state import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -177,10 +178,11 @@ async def codes_root(message: types.Message, state: FSMContext):
     await _show_events_page(message, state, page=0)
 
 
-@router.message(F.text == "🔑 Коды мероприятий")
+@router.message(StateFilter("*"), F.text == "🔑 Коды мероприятий")
 async def codes_from_admin_menu(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
         return
+    await state.clear()
     await _show_events_page(message, state, page=0)
 
 
