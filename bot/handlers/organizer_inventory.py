@@ -2,12 +2,13 @@ from aiogram import Router, types, F
 from aiogram.filters import Command
 
 from keyboards.student_keyboards import main_menu
-from keyboards.organizer_keyboards import organizer_menu
+from keyboards.organizer_keyboards import organizer_menu, ADMIN_PANEL_TEXT
 from utils.database import is_admin, get_db
 
 router = Router()
 
 BTN_TEXT = "📦 Отчёт по складу"
+INVENTORY_PAGE_LIMIT = 3200
 
 
 async def ensure_admin(message: types.Message):
@@ -17,21 +18,65 @@ async def ensure_admin(message: types.Message):
     return True
 
 
+async def ensure_admin_cb(call: types.CallbackQuery):
+    if not await is_admin(call.from_user.id):
+        await call.answer("Нет доступа", show_alert=True)
+        return False
+    return True
+
+
+def _inventory_kb(page: int, total_pages: int):
+    rows = []
+    nav = []
+    if page > 0:
+        nav.append(types.InlineKeyboardButton(text="⬅️", callback_data=f"org:inventory:page:{page - 1}"))
+    if page < total_pages - 1:
+        nav.append(types.InlineKeyboardButton(text="➡️", callback_data=f"org:inventory:page:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([types.InlineKeyboardButton(text="⬅️ В панель", callback_data="org:inventory:back")])
+    return types.InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _paginate_inventory_blocks(blocks: list[str]) -> list[str]:
+    pages: list[str] = []
+    current = ""
+
+    for block in blocks:
+        candidate = block if not current else f"{current}\n\n{block}"
+        if len(candidate) <= INVENTORY_PAGE_LIMIT:
+            current = candidate
+            continue
+
+        if current:
+            pages.append(current)
+            current = block
+            continue
+
+        pages.append(block[:INVENTORY_PAGE_LIMIT])
+        current = block[INVENTORY_PAGE_LIMIT:]
+
+    if current:
+        pages.append(current)
+
+    return pages or ["📦 Склад / отчёт\n\n— данных нет"]
+
+
 @router.message(Command("inventory"))
 async def inventory_cmd(message: types.Message):
     if not await ensure_admin(message):
         return
-    await _send_inventory_report(message)
+    await _open_inventory_report(message)
 
 
 @router.message(F.text == BTN_TEXT)
 async def inventory_btn(message: types.Message):
     if not await ensure_admin(message):
         return
-    await _send_inventory_report(message)
+    await _open_inventory_report(message)
 
 
-async def _send_inventory_report(message: types.Message):
+async def _build_inventory_pages() -> list[str]:
     pool = await get_db()
     async with pool.acquire() as conn:
         products = await conn.fetch(
@@ -83,13 +128,14 @@ async def _send_inventory_report(message: types.Message):
         )
         reserved_total_qty = int(reserved_total_qty or 0)
 
-    lines = []
-    lines.append("📦 Склад / отчёт")
-    lines.append("")
-    lines.append("Товары (на складе / зарезервировано / выдано):")
+    blocks = [
+        "📦 Склад / отчёт",
+        f"🧷 Всего зарезервировано (шт.): {reserved_total_qty}",
+        "Товары (на складе / зарезервировано / выдано):",
+    ]
 
     if not products:
-        lines.append("— товаров нет")
+        blocks.append("— товаров нет")
     else:
         for p in products:
             pid = int(p["id"])
@@ -101,23 +147,58 @@ async def _send_inventory_report(message: types.Message):
             fulfilled = int(p["fulfilled_qty"] or 0)
 
             status_badge = "✅" if active else "⛔️"
-            lines.append(
+            blocks.append(
                 f"{status_badge} {pid}. {name} — {pe} балл.\n"
                 f"   📦 склад: {stock} | 🧷 резерв: {reserved} | ✅ выдано: {fulfilled}"
             )
 
-    lines.append("")
-    lines.append(f"🧷 Всего зарезервировано (шт.): {reserved_total_qty}")
-
-    lines.append("")
-    lines.append("⏳ Последние заказы в RESERVED (ждут выдачи):")
+    blocks.append("⏳ Последние заказы в RESERVED (ждут выдачи):")
     if not reserved_orders:
-        lines.append("— нет")
+        blocks.append("— нет")
     else:
         for o in reserved_orders:
-            lines.append(f"• #{int(o['id'])} | user {int(o['user_id'])} | сумма {int(o['total_points'] or 0)} | {o['created_at']}")
+            blocks.append(
+                f"• #{int(o['id'])} | user {int(o['user_id'])} | "
+                f"сумма {int(o['total_points'] or 0)} | {o['created_at']}"
+            )
 
-    lines.append("")
-    lines.append("ℹ️ Примечание: 'выдано' считается по заказам со статусом FULFILLED и qty из order_items.")
+    blocks.append("ℹ️ Примечание: 'выдано' считается по заказам со статусом FULFILLED и qty из order_items.")
+    pages = _paginate_inventory_blocks(blocks)
+    total_pages = len(pages)
+    return [
+        f"{page_text}\n\nСтраница {idx + 1}/{total_pages}"
+        for idx, page_text in enumerate(pages)
+    ]
 
-    await message.answer("\n".join(lines), reply_markup=organizer_menu())
+
+async def _open_inventory_report(message: types.Message):
+    pages = await _build_inventory_pages()
+    await message.answer(
+        pages[0],
+        reply_markup=_inventory_kb(page=0, total_pages=len(pages)),
+    )
+
+
+@router.callback_query(F.data.startswith("org:inventory:page:"))
+async def inventory_page(call: types.CallbackQuery):
+    if not await ensure_admin_cb(call):
+        return
+
+    pages = await _build_inventory_pages()
+    page = int(call.data.split(":")[-1])
+    page = max(0, min(page, len(pages) - 1))
+    await call.message.edit_text(
+        pages[page],
+        reply_markup=_inventory_kb(page=page, total_pages=len(pages)),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "org:inventory:back")
+async def inventory_back(call: types.CallbackQuery):
+    if not await ensure_admin_cb(call):
+        return
+
+    await call.message.edit_text("Возврат в панель организатора.", reply_markup=None)
+    await call.message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
+    await call.answer()

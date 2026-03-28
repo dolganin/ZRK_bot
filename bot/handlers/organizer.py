@@ -35,6 +35,7 @@ from utils.shop_db import (
     )
 
 router = Router()
+ACTIVE_CODES_PAGE_SIZE = 8
 
 class OrganizerStates(StatesGroup):
     waiting_for_notification = State()
@@ -64,26 +65,60 @@ async def ensure_admin_cb(call: types.CallbackQuery):
     return True
 
 
-def _split_message_chunks(parts: list[str], limit: int = 3500) -> list[str]:
-    chunks: list[str] = []
-    current = ""
+def _events_root_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Добавить", callback_data="org:event:add")],
+        [InlineKeyboardButton(text="🗑 Удалить", callback_data="org:event:delete")],
+        [InlineKeyboardButton(text="⬅️ В панель", callback_data="org:event:back")],
+    ])
 
-    for part in parts:
-        if not current:
-            current = part
-            continue
 
-        if len(current) + len(part) <= limit:
-            current += part
-            continue
+def _codes_status_badge(status: str) -> str:
+    if status == "active":
+        return "🟢 ACTIVE"
+    if status == "pending":
+        return "🟡 PENDING"
+    if status == "expired":
+        return "🔴 EXPIRED"
+    return f"⚪️ {status.upper()}"
 
-        chunks.append(current)
-        current = part
 
-    if current:
-        chunks.append(current)
+def _active_codes_kb(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    rows = []
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"org:active_codes:page:{page - 1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"org:active_codes:page:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text="⬅️ В панель", callback_data="org:active_codes:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
-    return chunks
+
+def _render_active_codes_page(codes: list[dict], page: int) -> str:
+    total_pages = max(1, (len(codes) + ACTIVE_CODES_PAGE_SIZE - 1) // ACTIVE_CODES_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * ACTIVE_CODES_PAGE_SIZE
+    chunk = codes[start:start + ACTIVE_CODES_PAGE_SIZE]
+
+    lines = [f"📜 Коды ({page + 1}/{total_pages})", ""]
+    if not chunk:
+        lines.append("❌ Кодов нет")
+        return "\n".join(lines)
+
+    for c in chunk:
+        sign = "➕" if c["is_income"] else "➖"
+        lines.append(
+            f"🔸 {c['code']}\n"
+            f"🏷️ {c['event_name']}\n"
+            f"{_codes_status_badge(str(c.get('status', 'unknown')))}\n"
+            f"{sign} {c['points']} баллов\n"
+            f"📊 использований: {c['usage_count']}"
+        )
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
 
 @router.message(Command("admin"))
 async def admin_home(message: types.Message):
@@ -226,42 +261,87 @@ async def show_active_codes(message: types.Message, state: FSMContext):
         return
 
     await state.clear()
-    codes = [code for code in await get_codes_usage() if code.get("status") == "active"]
+    codes = await get_codes_usage()
     if not codes:
         await message.answer("❌ Нет активных кодов", reply_markup=organizer_menu())
         return
 
-    parts = ["🔑 Активные коды:"]
-    for c in codes:
-        sign = "➕" if c["is_income"] else "➖"
-        parts.append(
-            f"\n🔸 {c['code']}\n"
-            f"🏷️ {c['event_name']}\n"
-            f"{sign} {c['points']} баллов\n"
-            f"📊 использований: {c['usage_count']}"
-        )
+    total_pages = max(1, (len(codes) + ACTIVE_CODES_PAGE_SIZE - 1) // ACTIVE_CODES_PAGE_SIZE)
+    await message.answer(
+        _render_active_codes_page(codes, page=0),
+        reply_markup=_active_codes_kb(page=0, total_pages=total_pages),
+    )
 
-    chunks = _split_message_chunks(parts)
-    for idx, chunk in enumerate(chunks):
-        reply_markup = organizer_menu() if idx == len(chunks) - 1 else None
-        await message.answer(chunk, reply_markup=reply_markup)
+
+@router.callback_query(F.data.startswith("org:active_codes:page:"))
+async def show_active_codes_page(callback: types.CallbackQuery):
+    if not await ensure_admin_cb(callback):
+        return
+
+    codes = await get_codes_usage()
+    if not codes:
+        await callback.message.edit_text("❌ Нет кодов", reply_markup=None)
+        await callback.message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
+        await callback.answer()
+        return
+
+    page = int(callback.data.split(":")[-1])
+    total_pages = max(1, (len(codes) + ACTIVE_CODES_PAGE_SIZE - 1) // ACTIVE_CODES_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    await callback.message.edit_text(
+        _render_active_codes_page(codes, page=page),
+        reply_markup=_active_codes_kb(page=page, total_pages=total_pages),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "org:active_codes:back")
+async def show_active_codes_back(callback: types.CallbackQuery):
+    if not await ensure_admin_cb(callback):
+        return
+
+    await callback.message.edit_text("Возврат в панель организатора.", reply_markup=None)
+    await callback.message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
+    await callback.answer()
 
 @router.message(F.text == "🎯 Мероприятия")
 async def manage_events(message: types.Message):
     if not await ensure_admin(message):
         return
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Добавить", callback_data="org:event:add")],
-        [InlineKeyboardButton(text="🗑 Удалить", callback_data="org:event:delete")]
-    ])
-    await message.answer("Мероприятия:", reply_markup=keyboard)
+    await message.answer("Мероприятия:", reply_markup=_events_root_kb())
+
+
+@router.callback_query(F.data == "org:event:root")
+async def manage_events_root(callback: types.CallbackQuery, state: FSMContext):
+    if not await ensure_admin_cb(callback):
+        await state.clear()
+        return
+
+    await state.clear()
+    await callback.message.edit_text("Мероприятия:", reply_markup=_events_root_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "org:event:back")
+async def manage_events_back(callback: types.CallbackQuery, state: FSMContext):
+    if not await ensure_admin_cb(callback):
+        await state.clear()
+        return
+
+    await state.clear()
+    await callback.message.edit_text("Возврат в панель организатора.", reply_markup=None)
+    await callback.message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
+    await callback.answer()
 
 @router.callback_query(F.data == "org:event:add")
 async def event_add(callback: types.CallbackQuery, state: FSMContext):
     if not await ensure_admin_cb(callback):
         return
-    await callback.message.answer("📝 Введите название мероприятия:", reply_markup=admin_back_keyboard())
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="org:event:root")]
+    ])
+    await callback.message.edit_text("📝 Введите название мероприятия:", reply_markup=kb)
     await state.set_state(OrganizerStates.waiting_for_event_name)
     await callback.answer()
 
@@ -285,15 +365,15 @@ async def event_delete(callback: types.CallbackQuery, state: FSMContext):
 
     events = await get_events()
     if not events:
-        await callback.message.answer("❌ Нет мероприятий для удаления", reply_markup=organizer_menu())
+        await callback.message.edit_text("❌ Нет мероприятий для удаления", reply_markup=_events_root_kb())
         await callback.answer()
         return
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=e["name"], callback_data=f"org:event:del:{e['id']}")]
         for e in events
-    ])
-    await callback.message.answer("Выберите мероприятие для удаления:", reply_markup=keyboard)
+    ] + [[InlineKeyboardButton(text="⬅️ Назад", callback_data="org:event:root")]])
+    await callback.message.edit_text("Выберите мероприятие для удаления:", reply_markup=keyboard)
     await state.set_state(OrganizerStates.waiting_for_event_to_delete)
     await callback.answer()
 
