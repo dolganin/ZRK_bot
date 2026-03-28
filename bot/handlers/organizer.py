@@ -39,6 +39,7 @@ from utils.shop_db import (
     )
 
 router = Router()
+EVENTS_PAGE_SIZE = 8
 
 class OrganizerStates(StatesGroup):
     waiting_for_notification = State()
@@ -81,6 +82,68 @@ async def ensure_admin_cb(call: types.CallbackQuery):
         await call.answer("Нет доступа", show_alert=True)
         return False
     return True
+
+
+def _build_code_events_kb(events: list[dict], page: int) -> InlineKeyboardMarkup:
+    total_pages = max(1, (len(events) + EVENTS_PAGE_SIZE - 1) // EVENTS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * EVENTS_PAGE_SIZE
+    chunk = events[start:start + EVENTS_PAGE_SIZE]
+
+    rows = [
+        [InlineKeyboardButton(text=f"{e['id']}. {e['name']}", callback_data=f"org:code:event:{e['id']}")]
+        for e in chunk
+    ]
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"org:code:page:{page - 1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"org:code:page:{page + 1}"))
+    if nav:
+        rows.append(nav)
+
+    rows.append([InlineKeyboardButton(text="⬅️ В панель", callback_data="org:code:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _show_code_events_message(message: types.Message, state: FSMContext, page: int = 0):
+    events = await get_events()
+    if not events:
+        await message.answer("❌ Нет мероприятий", reply_markup=organizer_menu())
+        await state.clear()
+        return
+
+    total_pages = max(1, (len(events) + EVENTS_PAGE_SIZE - 1) // EVENTS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    await state.set_state(OrganizerStates.waiting_for_event_id)
+    await state.update_data(code_events_page=page)
+
+    await message.answer(
+        f"Выберите мероприятие ({page + 1}/{total_pages}):",
+        reply_markup=_build_code_events_kb(events, page),
+    )
+
+
+async def _show_code_events_callback(callback: types.CallbackQuery, state: FSMContext, page: int = 0):
+    events = await get_events()
+    if not events:
+        await callback.message.edit_text("❌ Нет мероприятий", reply_markup=None)
+        await callback.message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
+        await state.clear()
+        await callback.answer()
+        return
+
+    total_pages = max(1, (len(events) + EVENTS_PAGE_SIZE - 1) // EVENTS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    await state.set_state(OrganizerStates.waiting_for_event_id)
+    await state.update_data(code_events_page=page)
+
+    await callback.message.edit_text(
+        f"Выберите мероприятие ({page + 1}/{total_pages}):",
+        reply_markup=_build_code_events_kb(events, page),
+    )
+    await callback.answer()
 
 @router.message(Command("admin"))
 async def admin_home(message: types.Message):
@@ -309,18 +372,29 @@ async def delete_event_callback(callback: types.CallbackQuery, state: FSMContext
 async def codes_to_event(message: types.Message, state: FSMContext):
     if not await ensure_admin(message):
         return
+    await _show_code_events_message(message, state, page=0)
 
-    events = await get_events()
-    if not events:
-        await message.answer("❌ Нет мероприятий", reply_markup=organizer_menu())
+
+@router.callback_query(OrganizerStates.waiting_for_event_id, F.data.startswith("org:code:page:"))
+async def codes_to_event_page(callback: types.CallbackQuery, state: FSMContext):
+    if not await ensure_admin_cb(callback):
+        await state.clear()
         return
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{e['id']}. {e['name']}", callback_data=f"org:code:event:{e['id']}")]
-        for e in events
-    ])
-    await message.answer("Выберите мероприятие:", reply_markup=keyboard)
-    await state.set_state(OrganizerStates.waiting_for_event_id)
+    page = int(callback.data.split(":")[-1])
+    await _show_code_events_callback(callback, state, page)
+
+
+@router.callback_query(F.data == "org:code:back")
+async def codes_to_event_back(callback: types.CallbackQuery, state: FSMContext):
+    if not await ensure_admin_cb(callback):
+        await state.clear()
+        return
+
+    await state.clear()
+    await callback.message.edit_text("Возврат в панель организатора.", reply_markup=None)
+    await callback.message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
+    await callback.answer()
 
 @router.callback_query(OrganizerStates.waiting_for_event_id, F.data.startswith("org:code:event:"))
 async def select_event(callback: types.CallbackQuery, state: FSMContext):
@@ -335,10 +409,21 @@ async def select_event(callback: types.CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="➕ Создать код", callback_data="codes:add")],
         [InlineKeyboardButton(text="🗑 Удалить код", callback_data="codes:delete")],
         [InlineKeyboardButton(text="📜 Показать коды", callback_data="codes:list")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="org:code:root")],
     ])
 
-    await callback.message.answer("Коды мероприятия:", reply_markup=keyboard)
+    await callback.message.edit_text("Коды мероприятия:", reply_markup=keyboard)
     await callback.answer()
+
+
+@router.callback_query(F.data == "org:code:root")
+async def select_event_back(callback: types.CallbackQuery, state: FSMContext):
+    if not await ensure_admin_cb(callback):
+        await state.clear()
+        return
+
+    page = (await state.get_data()).get("code_events_page", 0)
+    await _show_code_events_callback(callback, state, page)
 
 
 @router.message(OrganizerStates.waiting_for_code_points)
