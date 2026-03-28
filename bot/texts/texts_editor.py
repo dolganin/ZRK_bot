@@ -3,7 +3,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from keyboards.organizer_keyboards import organizer_menu
+from keyboards.organizer_keyboards import organizer_menu, ADMIN_PANEL_TEXT
 from utils.database import is_admin
 from texts.storage import list_templates, get_template, set_text, set_photo, clear_photo
 
@@ -47,7 +47,8 @@ async def open_texts(message: types.Message, state: FSMContext):
 @router.callback_query(F.data == "txt:back")
 async def back_to_menu(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await cb.message.answer("Ок.", reply_markup=organizer_menu())
+    await cb.message.edit_text("Возврат в панель организатора.", reply_markup=None)
+    await cb.message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
     await cb.answer()
 
 @router.callback_query(F.data == "txt:list")
