@@ -222,7 +222,7 @@ async def show_active_codes(message: types.Message):
     if not await ensure_admin(message):
         return
 
-    codes = await get_codes_usage()
+    codes = [code for code in await get_codes_usage() if code.get("status") == "active"]
     if not codes:
         await message.answer("❌ Нет активных кодов", reply_markup=organizer_menu())
         return

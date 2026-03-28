@@ -63,14 +63,24 @@ async def add_item(order_id: int, product_id: int):
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                SELECT price_points
+                SELECT price_points, stock
                 FROM products
                 WHERE id = $1 AND is_active = TRUE
+                FOR UPDATE
                 """,
                 product_id
             )
             if not row:
                 return {"ok": False, "reason": "not_found"}
+
+            current_qty = await conn.fetchval(
+                "SELECT qty FROM order_items WHERE order_id = $1 AND product_id = $2",
+                order_id, product_id
+            )
+            current_qty = int(current_qty or 0)
+            stock = int(row["stock"] or 0)
+            if current_qty >= stock:
+                return {"ok": False, "reason": "out_of_stock"}
 
             await conn.execute(
                 """

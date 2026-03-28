@@ -130,7 +130,7 @@ async def shop_next(call: types.CallbackQuery):
 @router.callback_query(lambda c: c.data.startswith("shop:prev:"))
 async def shop_prev(call: types.CallbackQuery):
     idx = int(call.data.split(":")[2])
-    await show_product(call, call.from_user.id, idx)
+    await show_product(call, call.from_user.id, idx - 1)
 
 @router.callback_query(lambda c: c.data.startswith("shop:add:"))
 async def shop_add(call: types.CallbackQuery):
@@ -153,6 +153,11 @@ async def shop_add(call: types.CallbackQuery):
         return
 
     await show_product(call, call.from_user.id, idx)
+    await call.answer()
+
+
+@router.callback_query(lambda c: c.data == "shop:noop")
+async def shop_noop(call: types.CallbackQuery):
     await call.answer()
 
 
@@ -186,8 +191,7 @@ async def shop_cart(call: types.CallbackQuery):
     total_items = sum(int(it["qty"]) for it in items) if items else 0
 
     text = render_cart_text(items, total, balance)
-    await call.message.edit_text(text, reply_markup=shop_cart_kb(total_items=total_items))
-    await call.answer()
+    await upsert_product_message(call, text, shop_cart_kb(total_items=total_items), None)
 
 
 @router.callback_query(lambda c: c.data == "shop:checkout")
@@ -226,6 +230,20 @@ async def shop_checkout(call: types.CallbackQuery):
                 f"Недостаточно баллов: нужно {res['need']}, у тебя {res['balance']}",
                 show_alert=True
             )
+            return
+        if reason == "out_of_stock":
+            items = res.get("items") or []
+            if items:
+                lines = [
+                    f"{it['name']}: нужно {it['need']}, осталось {it['have']}"
+                    for it in items
+                ]
+                await call.answer(
+                    "Недостаточно остатков:\n" + "\n".join(lines),
+                    show_alert=True
+                )
+                return
+            await call.answer("Один или несколько товаров закончились", show_alert=True)
             return
         await call.answer("Не удалось оформить заказ", show_alert=True)
         return
