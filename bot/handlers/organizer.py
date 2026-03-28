@@ -36,6 +36,7 @@ from utils.shop_db import (
 
 router = Router()
 ACTIVE_CODES_PAGE_SIZE = 8
+PRODUCTS_PAGE_SIZE = 10
 
 class OrganizerStates(StatesGroup):
     waiting_for_notification = State()
@@ -71,6 +72,41 @@ def _events_root_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🗑 Удалить", callback_data="org:event:delete")],
         [InlineKeyboardButton(text="⬅️ В панель", callback_data="org:event:back")],
     ])
+
+
+def _products_list_kb(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    rows = []
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"org:prod:list:page:{page - 1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton(text="➡️", callback_data=f"org:prod:list:page:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text="⬅️ В панель", callback_data="org:prod:list:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _render_products_page(items: list[dict], page: int) -> str:
+    total_pages = max(1, (len(items) + PRODUCTS_PAGE_SIZE - 1) // PRODUCTS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * PRODUCTS_PAGE_SIZE
+    chunk = items[start:start + PRODUCTS_PAGE_SIZE]
+
+    lines = [f"🛒 Товары ({page + 1}/{total_pages})", ""]
+    if not chunk:
+        lines.append("Товаров нет.")
+        return "\n".join(lines)
+
+    for p in chunk:
+        status = "✅" if p["is_active"] else "🚫"
+        lines.append(
+            f"{status} {p['id']}. {p['name']} — {p['price_points']} баллов\n"
+            f"📦 Остаток: {p['stock']}"
+        )
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
 
 
 def _codes_status_badge(status: str) -> str:
@@ -491,14 +527,47 @@ async def prod_list(call: types.CallbackQuery):
         return
     items = await list_products(include_inactive=True)
     if not items:
-        await call.message.answer("Товаров нет.", reply_markup=organizer_menu())
+        await call.message.edit_text("Товаров нет.", reply_markup=None)
+        await call.message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
         await call.answer()
         return
-    lines = ["🛒 Товары:"]
-    for p in items:
-        status = "✅" if p["is_active"] else "🚫"
-        lines.append(f"{status} {p['id']}. {p['name']} — {p['price_points']} баллов")
-    await call.message.answer("\n".join(lines), reply_markup=organizer_menu())
+    total_pages = max(1, (len(items) + PRODUCTS_PAGE_SIZE - 1) // PRODUCTS_PAGE_SIZE)
+    await call.message.edit_text(
+        _render_products_page(items, page=0),
+        reply_markup=_products_list_kb(page=0, total_pages=total_pages),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("org:prod:list:page:"))
+async def prod_list_page(call: types.CallbackQuery):
+    if not await ensure_admin_cb(call):
+        return
+
+    items = await list_products(include_inactive=True)
+    if not items:
+        await call.message.edit_text("Товаров нет.", reply_markup=None)
+        await call.message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
+        await call.answer()
+        return
+
+    page = int(call.data.split(":")[-1])
+    total_pages = max(1, (len(items) + PRODUCTS_PAGE_SIZE - 1) // PRODUCTS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    await call.message.edit_text(
+        _render_products_page(items, page=page),
+        reply_markup=_products_list_kb(page=page, total_pages=total_pages),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "org:prod:list:back")
+async def prod_list_back(call: types.CallbackQuery):
+    if not await ensure_admin_cb(call):
+        return
+
+    await call.message.edit_text("Возврат в панель организатора.", reply_markup=None)
+    await call.message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
     await call.answer()
 
 @router.message(OrganizerStates.waiting_for_product_photo)
