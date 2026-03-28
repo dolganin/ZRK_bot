@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from keyboards.organizer_keyboards import organizer_menu
+from keyboards.organizer_keyboards import organizer_menu, ADMIN_PANEL_TEXT
 from keyboards.student_keyboards import main_menu
 from utils.database import (
     is_admin,
@@ -177,6 +177,13 @@ async def codes_root(message: types.Message, state: FSMContext):
     await _show_events_page(message, state, page=0)
 
 
+@router.message(F.text == "🔑 Коды мероприятий")
+async def codes_from_admin_menu(message: types.Message, state: FSMContext):
+    if not await ensure_admin(message):
+        return
+    await _show_events_page(message, state, page=0)
+
+
 @router.callback_query(CodesStates.waiting_for_event_id, F.data.startswith("codes:page:"))
 async def codes_events_page(call: types.CallbackQuery, state: FSMContext):
     if not await ensure_admin_cb(call):
@@ -195,7 +202,7 @@ async def codes_back(call: types.CallbackQuery, state: FSMContext):
 
     await state.clear()
     await call.message.edit_text("Возврат в панель организатора.", reply_markup=None)
-    await call.message.answer("🛠 Панель организатора", reply_markup=organizer_menu())
+    await call.message.answer(ADMIN_PANEL_TEXT, reply_markup=organizer_menu())
     await call.answer()
 
 
