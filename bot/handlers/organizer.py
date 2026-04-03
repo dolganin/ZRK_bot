@@ -156,6 +156,26 @@ def _render_active_codes_page(codes: list[dict], page: int) -> str:
 
     return "\n".join(lines).rstrip()
 
+
+def _chunk_text_lines(lines: list[str], limit: int = 3500) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+
+    for line in lines:
+        piece = line if not current else f"\n{line}"
+        if len(current) + len(piece) <= limit:
+            current += piece
+            continue
+
+        if current:
+            chunks.append(current)
+        current = line
+
+    if current:
+        chunks.append(current)
+
+    return chunks or [""]
+
 @router.message(Command("admin"))
 async def admin_home(message: types.Message):
     if not await ensure_admin(message):
@@ -197,7 +217,10 @@ async def handle_rating_limit(message: types.Message, state: FSMContext):
     for place, student in enumerate(rating, 1):
         lines.append(f"{place}. {student['name']} — {student['balance']}")
 
-    await message.answer("\n".join(lines), reply_markup=organizer_menu())
+    chunks = _chunk_text_lines(lines)
+    for idx, chunk in enumerate(chunks):
+        markup = organizer_menu() if idx == len(chunks) - 1 else None
+        await message.answer(chunk, reply_markup=markup)
     await state.clear()
 
 @router.message(F.text == "📢 Уведомление")
