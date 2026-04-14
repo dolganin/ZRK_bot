@@ -16,21 +16,16 @@ def normalize_database_url(raw_url: str) -> str:
     return raw_url
 
 
-def make_output_dir(explicit_path: str | None) -> Path:
+def make_output_path(explicit_path: str | None) -> Path:
     if explicit_path:
         return Path(explicit_path).expanduser().resolve()
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    return Path.cwd() / f"zrk_export_{timestamp}"
+    return Path.cwd() / f"zrk_export_{timestamp}.xlsx"
 
 
 def sheet_name(name: str) -> str:
     safe = re.sub(r"[\[\]\*\?/\\:]", "_", name).strip()
     return safe[:31] or "sheet"
-
-
-def safe_filename(name: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
-    return safe or "table"
 
 
 def excel_value(value):
@@ -84,35 +79,53 @@ def build_meta_rows(db_url: str, tables: list[tuple[str, int]]) -> list[list[str
     ]
 
 
-def save_table_workbook(table_name: str, columns, rows, output_dir: Path) -> Path:
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = sheet_name(table_name)
+def fetch_codes_usage_rows(cursor):
+    cursor.execute(
+        """
+        SELECT
+            c.id,
+            c.code,
+            e.name AS event_name,
+            c.points,
+            c.is_income,
+            c.created_at,
+            c.starts_at,
+            c.expires_at,
+            c.max_uses,
+            COUNT(uc.user_id) AS usage_count
+        FROM codes c
+        LEFT JOIN events e ON e.id = c.event_id
+        LEFT JOIN user_codes uc ON uc.code_id = c.id
+        GROUP BY
+            c.id,
+            c.code,
+            e.name,
+            c.points,
+            c.is_income,
+            c.created_at,
+            c.starts_at,
+            c.expires_at,
+            c.max_uses
+        ORDER BY c.id
+        """
+    )
+    columns = [desc[0] for desc in cursor.description]
+    rows = cursor.fetchall()
+    return columns, rows
+
+
+def append_sheet(workbook: Workbook, title: str, columns, rows) -> None:
+    sheet = workbook.create_sheet(title=sheet_name(title))
     sheet.append(columns)
     for row in rows:
         sheet.append([excel_value(value) for value in row])
     sheet.freeze_panes = "A2"
 
-    file_path = output_dir / f"{safe_filename(table_name)}.xlsx"
-    workbook.save(file_path)
-    return file_path
 
-
-def save_summary_workbook(database_url: str, tables: list[tuple[str, int]], output_dir: Path) -> Path:
+def export_database(database_url: str, output_path: Path) -> Path:
     workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "summary"
-    for row in build_meta_rows(database_url, tables):
-        sheet.append(row)
-
-    file_path = output_dir / "summary.xlsx"
-    workbook.save(file_path)
-    return file_path
-
-
-def export_database(database_url: str, output_dir: Path) -> list[Path]:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    created_files: list[Path] = []
+    summary_sheet = workbook.active
+    summary_sheet.title = "summary"
 
     with psycopg2.connect(database_url) as conn:
         with conn.cursor() as cursor:
@@ -122,20 +135,28 @@ def export_database(database_url: str, output_dir: Path) -> list[Path]:
             for table_name in table_names:
                 columns, rows = fetch_table_rows(cursor, table_name)
                 exported_tables.append((table_name, len(rows)))
-                created_files.append(save_table_workbook(table_name, columns, rows, output_dir))
+                append_sheet(workbook, table_name, columns, rows)
 
-    created_files.append(save_summary_workbook(database_url, exported_tables, output_dir))
-    return created_files
+            codes_usage_columns, codes_usage_rows = fetch_codes_usage_rows(cursor)
+
+    for row in build_meta_rows(database_url, exported_tables):
+        summary_sheet.append(row)
+
+    append_sheet(workbook, "codes_usage", codes_usage_columns, codes_usage_rows)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    workbook.save(output_path)
+    return output_path
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Export all public PostgreSQL tables into separate XLSX files."
+        description="Export all public PostgreSQL tables into a single XLSX workbook."
     )
     parser.add_argument(
         "-o",
         "--output",
-        help="Path to output directory. Default: ./zrk_export_<timestamp>/",
+        help="Path to output XLSX file. Default: ./zrk_export_<timestamp>.xlsx",
     )
     args = parser.parse_args()
 
@@ -143,9 +164,9 @@ def main() -> None:
     if not database_url:
         raise SystemExit("DATABASE_URL is not set")
 
-    output_dir = make_output_dir(args.output)
-    export_database(database_url, output_dir)
-    print(output_dir)
+    output_path = make_output_path(args.output)
+    export_database(database_url, output_path)
+    print(output_path)
 
 
 if __name__ == "__main__":
