@@ -1,7 +1,7 @@
 import argparse
 import os
 import re
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlparse
@@ -19,7 +19,7 @@ def normalize_database_url(raw_url: str) -> str:
 def make_output_path(explicit_path: str | None) -> Path:
     if explicit_path:
         return Path(explicit_path).expanduser().resolve()
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     return Path.cwd() / f"zrk_export_{timestamp}.xlsx"
 
 
@@ -31,6 +31,14 @@ def sheet_name(name: str) -> str:
 def excel_value(value):
     if isinstance(value, Decimal):
         return float(value)
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(UTC).replace(tzinfo=None)
+        return value
+    if isinstance(value, time):
+        if value.tzinfo is not None:
+            return value.replace(tzinfo=None)
+        return value
     if isinstance(value, (datetime, date, time, int, float, bool)) or value is None:
         return value
     return str(value)
@@ -59,7 +67,7 @@ def fetch_table_rows(cursor, table_name: str):
 def build_meta_rows(db_url: str, tables: list[tuple[str, int]]) -> list[list[str | int]]:
     parsed = urlparse(db_url)
     return [
-        ["exported_at_utc", datetime.utcnow().isoformat(timespec="seconds") + "Z"],
+        ["exported_at_utc", datetime.now(UTC).isoformat(timespec="seconds")],
         ["database", (parsed.path or "/").lstrip("/")],
         ["host", parsed.hostname or ""],
         ["port", parsed.port or ""],
